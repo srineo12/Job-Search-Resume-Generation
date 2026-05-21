@@ -13,7 +13,7 @@ All generated resumes and cover letters are stored in Google Drive. The app uses
 - Refresh token and access token stored in `integrations` row for the `google_drive` provider.
 - Access tokens refreshed on demand when expired.
 
-Service account is not used in MVP — it complicates Drive sharing for a personal account..
+Service account is not used in MVP — it complicates Drive sharing for a personal account.
 
 ## 3. Folder Structure
 /JobApps/                           ← root folder, ID stored in integrations.credentials

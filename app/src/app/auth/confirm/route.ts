@@ -7,6 +7,8 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const next = searchParams.get('next') ?? '/dashboard'
   const cookieStore = await cookies()
+  let response = NextResponse.redirect(new URL(next, request.url))
+  let cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }> = []
 
   // PKCE flow — code exchange (newer Supabase default)
   const code = searchParams.get('code')
@@ -17,8 +19,9 @@ export async function GET(request: NextRequest) {
       {
         cookies: {
           getAll() { return cookieStore.getAll() },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => {
+          setAll(cookiesToSet_) {
+            cookiesToSet = cookiesToSet_
+            cookiesToSet_.forEach(({ name, value, options }) => {
               cookieStore.set(name, value, options)
             })
           },
@@ -27,7 +30,11 @@ export async function GET(request: NextRequest) {
     )
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
-      return NextResponse.redirect(new URL(next, request.url))
+      // Manually set cookies on redirect response
+      cookiesToSet.forEach(({ name, value, options }) => {
+        response.cookies.set(name, value, options as Parameters<typeof response.cookies.set>[2])
+      })
+      return response
     }
   }
 
@@ -41,8 +48,9 @@ export async function GET(request: NextRequest) {
       {
         cookies: {
           getAll() { return cookieStore.getAll() },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => {
+          setAll(cookiesToSet_) {
+            cookiesToSet = cookiesToSet_
+            cookiesToSet_.forEach(({ name, value, options }) => {
               cookieStore.set(name, value, options)
             })
           },
@@ -51,7 +59,11 @@ export async function GET(request: NextRequest) {
     )
     const { error } = await supabase.auth.verifyOtp({ type, token_hash })
     if (!error) {
-      return NextResponse.redirect(new URL(next, request.url))
+      // Manually set cookies on redirect response
+      cookiesToSet.forEach(({ name, value, options }) => {
+        response.cookies.set(name, value, options as Parameters<typeof response.cookies.set>[2])
+      })
+      return response
     }
   }
 

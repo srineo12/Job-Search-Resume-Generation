@@ -26,24 +26,12 @@ export async function GET(
     return NextResponse.json({ error: 'Import not found' }, { status: 404 })
   }
 
-  // Get actor config to access actor_id
-  const { data: actor, error: actorError } = await supabase
-    .from('apify_actors')
-    .select('actor_id')
-    .eq('user_id', user.id)
-    .eq('source', importRecord.source)
-    .single()
-
-  if (actorError || !actor) {
-    return NextResponse.json({ error: 'Actor config not found' }, { status: 400 })
-  }
-
-  // Get run status from Apify
+  // Get run status from Apify — use /actor-runs/{runId} (no actor_id needed, avoids ~ encoding issue)
   let runStatus: string
   let runData: any
   try {
     const statusResponse = await fetch(
-      `https://api.apify.com/v2/acts/${actor.actor_id}/runs/${importRecord.apify_run_id}`,
+      `https://api.apify.com/v2/actor-runs/${importRecord.apify_run_id}`,
       {
         headers: {
           'Authorization': `Bearer ${process.env.APIFY_TOKEN}`,

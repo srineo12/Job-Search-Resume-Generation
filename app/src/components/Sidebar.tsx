@@ -16,6 +16,7 @@ const settingsItems = [
   { href: '/settings/prompts', label: 'Prompts', icon: '✏️' },
   { href: '/settings/style', label: 'Style', icon: '🎨' },
   { href: '/settings/keywords', label: 'Keyword Sets', icon: '🔑' },
+  { href: '/settings/actors', label: 'Apify Actors', icon: '🕷️' },
   { href: '/settings/integrations', label: 'Integrations', icon: '🔗' },
 ]
 
@@ -61,7 +62,7 @@ export default function Sidebar({ user }: { user: User }) {
           <span>🚪</span>
           <span>Sign out</span>
         </button>
-        <p className="text-center text-gray-600 text-xs">v0.4.0 — 2026-05-22</p>
+        <p className="text-center text-gray-600 text-xs">v0.4.1 — 2026-05-22</p>
       </div>
     </aside>
   )

@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  // Get all imports for this user, sorted by created_at DESC
   const { data, error } = await supabase
     .from('imports')
     .select('*')
@@ -23,122 +22,74 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
-  const { source, keyword_set_ids, location, max_items } = body
+  const { source, keyword_set_ids, include_in_title = [], date_range = '', max_items = 100 } = body
 
-  // Validate request
-  if (!source || !['seek', 'indeed'].includes(source)) {
+  if (!source || !['seek', 'indeed'].includes(source))
     return NextResponse.json({ error: 'Invalid source' }, { status: 400 })
-  }
-
-  if (!Array.isArray(keyword_set_ids) || keyword_set_ids.length === 0) {
+  if (!Array.isArray(keyword_set_ids) || keyword_set_ids.length === 0)
     return NextResponse.json({ error: 'At least one keyword set is required' }, { status: 400 })
-  }
 
-  // Get actor config for this source
-  const { data: actor, error: actorError } = await supabase
-    .from('apify_actors')
-    .select('*')
-    .eq('user_id', user.id)
-    .eq('source', source)
-    .single()
+  // Load actor config
+  const { data: actor } = await supabase
+    .from('apify_actors').select('*').eq('user_id', user.id).eq('source', source).single()
+  if (!actor?.actor_id?.trim())
+    return NextResponse.json({ error: `Apify actor not configured for ${source}. Go to Settings → Apify Actors.` }, { status: 400 })
 
-  if (actorError || !actor) {
-    return NextResponse.json(
-      { error: `Apify actor not configured for ${source}. Please set it up in Settings.` },
-      { status: 400 }
-    )
-  }
-
-  if (!actor.actor_id?.trim()) {
-    return NextResponse.json(
-      { error: `Apify actor ID is not set for ${source}` },
-      { status: 400 }
-    )
-  }
-
-  // Get keyword sets
-  const { data: keywordSets, error: keywordsError } = await supabase
-    .from('keyword_sets')
-    .select('keywords')
-    .eq('user_id', user.id)
-    .in('id', keyword_set_ids)
-
-  if (keywordsError || !keywordSets || keywordSets.length === 0) {
-    return NextResponse.json({ error: 'Could not load keyword sets' }, { status: 400 })
-  }
-
-  // Flatten keywords from all sets
-  const allKeywords = keywordSets.flatMap((set) => set.keywords || [])
-  if (allKeywords.length === 0) {
+  // Load keyword sets
+  const { data: keywordSets } = await supabase
+    .from('keyword_sets').select('keywords').eq('user_id', user.id).in('id', keyword_set_ids)
+  const allKeywords = (keywordSets || []).flatMap(s => s.keywords || [])
+  if (!allKeywords.length)
     return NextResponse.json({ error: 'No keywords found in selected sets' }, { status: 400 })
-  }
 
-  // Merge Apify input
-  const defaultInput = actor.default_input || {}
+  // Build Apify input — merge default_input with hardcoded Melbourne filters
   const apifyInput = {
-    ...defaultInput,
+    ...(actor.default_input || {}),
+    // Search terms
+    query: allKeywords.join(' OR '),
     keywords: allKeywords,
-    location: location || 'Melbourne VIC',
-    maxItems: max_items || 100,
+    // Title filter
+    ...(include_in_title.length > 0 ? { jobTitleIncludes: include_in_title } : {}),
+    // Hardcoded Melbourne
+    location: 'Melbourne VIC',
+    locationRadius: 50,
+    country: 'AU',
+    // Filters
+    sortBy: 'relevance',
+    ...(date_range ? { dateRange: date_range, postedIn: date_range } : {}),
+    maxItems: Math.min(max_items, 500),
   }
 
-  // Call Apify API to trigger run
+  // Trigger Apify run
   let apifyRunId: string
   try {
-    const apifyResponse = await fetch(
-      `https://api.apify.com/v2/acts/${actor.actor_id}/runs`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.APIFY_TOKEN}`,
-        },
-        body: JSON.stringify(apifyInput),
-      }
-    )
-
-    if (!apifyResponse.ok) {
-      const errorText = await apifyResponse.text()
-      console.error('Apify API error:', apifyResponse.status, errorText)
-      return NextResponse.json(
-        { error: `Apify API error: ${apifyResponse.statusText}` },
-        { status: 500 }
-      )
+    const resp = await fetch(`https://api.apify.com/v2/acts/${actor.actor_id}/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.APIFY_TOKEN}` },
+      body: JSON.stringify(apifyInput),
+    })
+    if (!resp.ok) {
+      const txt = await resp.text()
+      console.error('Apify error:', resp.status, txt)
+      return NextResponse.json({ error: `Apify error: ${resp.statusText}` }, { status: 500 })
     }
-
-    const apifyData = await apifyResponse.json()
+    const apifyData = await resp.json()
     apifyRunId = apifyData.data?.id
-    if (!apifyRunId) {
-      console.error('No run ID in Apify response:', apifyData)
-      return NextResponse.json({ error: 'Failed to start Apify run' }, { status: 500 })
-    }
-  } catch (error) {
-    console.error('Error calling Apify API:', error)
-    return NextResponse.json(
-      { error: 'Failed to call Apify API' },
-      { status: 500 }
-    )
+    if (!apifyRunId) return NextResponse.json({ error: 'No run ID from Apify' }, { status: 500 })
+  } catch (err) {
+    console.error('Apify call failed:', err)
+    return NextResponse.json({ error: 'Failed to call Apify' }, { status: 500 })
   }
 
-  // Insert imports row
-  const { data: importRecord, error: insertError } = await supabase
+  const { data: importRecord, error: insertErr } = await supabase
     .from('imports')
     .insert({
-      user_id: user.id,
-      source,
-      actor_id: actor.actor_id,
-      keyword_set_ids,
-      input_payload: apifyInput,
-      apify_run_id: apifyRunId,
-      status: 'queued',
+      user_id: user.id, source, actor_id: actor.actor_id,
+      keyword_set_ids, input_payload: apifyInput,
+      apify_run_id: apifyRunId, status: 'queued',
     })
-    .select()
-    .single()
+    .select().single()
 
-  if (insertError) {
-    console.error('Error inserting import record:', insertError)
-    return NextResponse.json({ error: insertError.message }, { status: 500 })
-  }
-
+  if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 })
   return NextResponse.json({ import: importRecord }, { status: 201 })
 }

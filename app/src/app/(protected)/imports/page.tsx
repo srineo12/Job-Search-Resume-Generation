@@ -13,11 +13,17 @@ interface Import {
   id: string
   source: 'seek' | 'indeed'
   status: 'queued' | 'running' | 'succeeded' | 'failed'
-  stats?: Record<string, number>
+  stats?: { fetched?: number; inserted?: number; duplicates_by_url?: number; duplicates_by_employer_title?: number }
   error_message?: string
   created_at: string
-  finished_at?: string
 }
+
+const DATE_RANGES = [
+  { value: '', label: 'Any time' },
+  { value: '1d', label: 'Last 24 hours' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+]
 
 export default function ImportsPage() {
   const [imports, setImports] = useState<Import[]>([])
@@ -26,11 +32,11 @@ export default function ImportsPage() {
   const [refreshing, setRefreshing] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-
   const [form, setForm] = useState({
     source: 'seek' as 'seek' | 'indeed',
     keyword_set_ids: [] as string[],
-    location: 'Melbourne VIC',
+    include_in_title: '',
+    date_range: '30d',
     max_items: 100,
   })
 
@@ -42,23 +48,15 @@ export default function ImportsPage() {
   }, [])
 
   async function loadKeywordSets() {
-    try {
-      const res = await fetch('/api/settings/keywords')
-      const data = await res.json()
-      setKeywordSets(data.keyword_sets || [])
-    } catch (err) {
-      console.error('Failed to load keyword sets:', err)
-    }
+    const res = await fetch('/api/settings/keywords')
+    const d = await res.json()
+    setKeywordSets(d.keyword_sets || [])
   }
 
   async function loadImports() {
-    try {
-      const res = await fetch('/api/imports')
-      const data = await res.json()
-      setImports(data.imports || [])
-    } catch (err) {
-      console.error('Failed to load imports:', err)
-    }
+    const res = await fetch('/api/imports')
+    const d = await res.json()
+    setImports(d.imports || [])
   }
 
   async function handleTrigger(e: React.FormEvent) {
@@ -66,23 +64,22 @@ export default function ImportsPage() {
     setTriggering(true)
     setError('')
     setSuccess('')
-
     try {
       const res = await fetch('/api/imports', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          source: form.source,
+          keyword_set_ids: form.keyword_set_ids,
+          include_in_title: form.include_in_title.split('\n').map(s => s.trim()).filter(Boolean),
+          date_range: form.date_range,
+          max_items: form.max_items,
+        }),
       })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        setError(data.error || 'Failed to trigger import')
-        return
-      }
-
-      setSuccess(`Import started for ${form.source}. Run ID: ${data.import.apify_run_id}`)
-      setForm({ ...form, keyword_set_ids: [] })
+      const d = await res.json()
+      if (!res.ok) { setError(d.error || 'Failed'); return }
+      setSuccess(`Import queued! Apify run: ${d.import.apify_run_id}`)
+      setForm(f => ({ ...f, keyword_set_ids: [] }))
       loadImports()
     } catch (err) {
       setError(String(err))
@@ -94,17 +91,11 @@ export default function ImportsPage() {
   async function handleRefresh(importId: string) {
     setRefreshing(importId)
     setError('')
-
     try {
       const res = await fetch(`/api/imports/${importId}/refresh`)
-      const data = await res.json()
-
-      if (!res.ok) {
-        setError(data.error || 'Failed to refresh')
-        return
-      }
-
-      setSuccess(`Import status: ${data.import.status}`)
+      const d = await res.json()
+      if (!res.ok) { setError(d.error || 'Refresh failed'); return }
+      setSuccess(d.message || `Status: ${d.import?.status}`)
       loadImports()
     } catch (err) {
       setError(String(err))
@@ -114,203 +105,134 @@ export default function ImportsPage() {
   }
 
   return (
-    <div className="max-w-5xl">
-      <div className="mb-8">
+    <div className="max-w-4xl">
+      <div className="mb-6">
         <h1 className="text-2xl font-bold text-white">Imports</h1>
-        <p className="text-gray-400 text-sm mt-1">Trigger job imports from Seek or Indeed using Apify.</p>
+        <p className="text-gray-400 text-sm mt-1">Pull jobs from Seek / Indeed via Apify. Location hardcoded to Melbourne VIC, 50km radius.</p>
       </div>
 
-      {error && (
-        <div className="mb-6 p-4 bg-red-950 border border-red-800 rounded-lg text-red-400 text-sm">
-          {error}
-        </div>
-      )}
-      {success && (
-        <div className="mb-6 p-4 bg-green-950 border border-green-800 rounded-lg text-green-400 text-sm">
-          {success}
-        </div>
-      )}
+      {error && <div className="mb-4 p-3 bg-red-950 border border-red-800 rounded-lg text-red-400 text-sm">{error}</div>}
+      {success && <div className="mb-4 p-3 bg-green-950 border border-green-800 rounded-lg text-green-400 text-sm">{success}</div>}
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-8">
-        <p className="text-white font-medium mb-6">Trigger New Import</p>
-
+      {/* Form */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+        <p className="text-white font-medium mb-4">New Import</p>
         <form onSubmit={handleTrigger} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="text-xs text-gray-500 mb-2 block">Source</label>
-              <select
-                value={form.source}
-                onChange={(e) => setForm({ ...form, source: e.target.value as 'seek' | 'indeed' })}
-                disabled={triggering}
-                className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
-              >
+              <label className="text-xs text-gray-500 mb-1.5 block">Source</label>
+              <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value as any }))} disabled={triggering}
+                className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50">
                 <option value="seek">Seek</option>
                 <option value="indeed">Indeed</option>
               </select>
             </div>
-
             <div>
-              <label className="text-xs text-gray-500 mb-2 block">Location</label>
-              <input
-                type="text"
-                value={form.location}
-                onChange={(e) => setForm({ ...form, location: e.target.value })}
+              <label className="text-xs text-gray-500 mb-1.5 block">Date Range</label>
+              <select value={form.date_range} onChange={e => setForm(f => ({ ...f, date_range: e.target.value }))} disabled={triggering}
+                className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50">
+                {DATE_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block">Max Results</label>
+              <input type="number" value={form.max_items} min={10} max={500}
+                onChange={e => setForm(f => ({ ...f, max_items: parseInt(e.target.value) || 100 }))}
                 disabled={triggering}
-                className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
-              />
+                className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50" />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs text-gray-500 mb-2 block">Max Items</label>
-              <input
-                type="number"
-                value={form.max_items}
-                onChange={(e) => setForm({ ...form, max_items: parseInt(e.target.value) })}
-                min="10"
-                max="1000"
-                disabled={triggering}
-                className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
-              />
-            </div>
-          </div>
-
+          {/* Search Terms (keyword sets) */}
           <div>
-            <label className="text-xs text-gray-500 mb-2 block">Keyword Sets</label>
-            <div className="space-y-2 bg-gray-950 border border-gray-800 rounded-lg p-3 max-h-40 overflow-y-auto">
+            <label className="text-xs text-gray-500 mb-1.5 block">Search Terms <span className="text-gray-600">(select keyword sets)</span></label>
+            <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 max-h-36 overflow-y-auto space-y-1.5">
               {keywordSets.length === 0 ? (
-                <p className="text-gray-600 text-sm">
-                  No keyword sets. Create one in{' '}
-                  <Link href="/settings/keywords" className="text-indigo-400 hover:text-indigo-300">
-                    Settings
-                  </Link>
-                  .
-                </p>
-              ) : (
-                keywordSets.map((set) => (
-                  <label key={set.id} className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={form.keyword_set_ids.includes(set.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setForm({ ...form, keyword_set_ids: [...form.keyword_set_ids, set.id] })
-                        } else {
-                          setForm({
-                            ...form,
-                            keyword_set_ids: form.keyword_set_ids.filter((id) => id !== set.id),
-                          })
-                        }
-                      }}
-                      disabled={triggering}
-                      className="w-4 h-4 accent-indigo-500 disabled:opacity-50"
-                    />
-                    <span className="text-white text-sm">{set.name}</span>
-                    <span className="text-gray-500 text-xs">({set.keywords?.length || 0} keywords)</span>
-                  </label>
-                ))
-              )}
+                <p className="text-gray-600 text-xs">No keyword sets — <Link href="/settings/keywords" className="text-indigo-400">create one in Settings</Link>.</p>
+              ) : keywordSets.map(set => (
+                <label key={set.id} className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={form.keyword_set_ids.includes(set.id)} disabled={triggering}
+                    onChange={e => setForm(f => ({
+                      ...f,
+                      keyword_set_ids: e.target.checked ? [...f.keyword_set_ids, set.id] : f.keyword_set_ids.filter(id => id !== set.id)
+                    }))}
+                    className="w-3.5 h-3.5 accent-indigo-500" />
+                  <span className="text-white text-sm">{set.name}</span>
+                  <span className="text-gray-600 text-xs">({set.keywords?.length || 0} terms)</span>
+                </label>
+              ))}
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={triggering || form.keyword_set_ids.length === 0 || keywordSets.length === 0}
-            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed text-white font-medium rounded-lg text-sm transition-colors"
-          >
-            {triggering ? 'Starting import...' : 'Start Import'}
+          {/* Include in Title */}
+          <div>
+            <label className="text-xs text-gray-500 mb-1.5 block">Include (one in title) <span className="text-gray-600">— at least one term must appear in the job title</span></label>
+            <textarea value={form.include_in_title}
+              onChange={e => setForm(f => ({ ...f, include_in_title: e.target.value }))}
+              disabled={triggering}
+              rows={3}
+              placeholder={"teacher aide\nteaching assistant\neducation support\nlearning support"}
+              className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none disabled:opacity-50" />
+          </div>
+
+          <button type="submit" disabled={triggering || form.keyword_set_ids.length === 0}
+            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed text-white font-medium rounded-lg text-sm transition-colors">
+            {triggering ? 'Starting...' : 'Start Import'}
           </button>
         </form>
       </div>
 
+      {/* Import history */}
       <div>
-        <p className="text-white font-medium mb-4">Import History</p>
-
-        {imports.length === 0 ? (
-          <p className="text-gray-600 text-sm">No imports yet.</p>
-        ) : (
-          <div className="space-y-3">
-            {imports.map((imp) => (
-              <div
-                key={imp.id}
-                className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-start justify-between"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="text-white font-medium capitalize">{imp.source}</span>
-                    <span
-                      className={`text-xs px-2 py-1 rounded-full font-medium ${
-                        imp.status === 'succeeded'
-                          ? 'bg-green-900 text-green-400'
-                          : imp.status === 'failed'
-                            ? 'bg-red-900 text-red-400'
-                            : imp.status === 'running'
-                              ? 'bg-yellow-900 text-yellow-400'
-                              : 'bg-gray-800 text-gray-400'
-                      }`}
-                    >
-                      {imp.status === 'queued' && '⏳ Queued'}
-                      {imp.status === 'running' && '⚙️ Running'}
-                      {imp.status === 'succeeded' && '✓ Succeeded'}
-                      {imp.status === 'failed' && '✗ Failed'}
-                    </span>
+        <p className="text-white font-medium mb-3">Import History</p>
+        {imports.length === 0
+          ? <p className="text-gray-600 text-sm">No imports yet.</p>
+          : <div className="space-y-2">
+              {imports.map(imp => {
+                const dupes = (imp.stats?.duplicates_by_url || 0) + (imp.stats?.duplicates_by_employer_title || 0)
+                return (
+                  <div key={imp.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <span className="text-white font-medium capitalize">{imp.source}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
+                        imp.status === 'succeeded' ? 'bg-green-900 text-green-400' :
+                        imp.status === 'failed' ? 'bg-red-900 text-red-400' :
+                        imp.status === 'running' ? 'bg-yellow-900 text-yellow-400' : 'bg-gray-800 text-gray-400'
+                      }`}>
+                        {imp.status === 'queued' && '⏳ Queued'}
+                        {imp.status === 'running' && '⚙️ Running'}
+                        {imp.status === 'succeeded' && '✓ Done'}
+                        {imp.status === 'failed' && '✗ Failed'}
+                      </span>
+                      <span className="text-gray-500 text-xs truncate">
+                        {imp.status === 'succeeded' && imp.stats ? `${imp.stats.inserted} new · ${dupes} dupes` : ''}
+                        {imp.status === 'failed' && imp.error_message ? imp.error_message : ''}
+                        {(imp.status === 'queued' || imp.status === 'running') ? new Date(imp.created_at).toLocaleString() : ''}
+                      </span>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      {(imp.status === 'queued' || imp.status === 'running') && (
+                        <button onClick={() => handleRefresh(imp.id)} disabled={refreshing === imp.id}
+                          className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white rounded-lg">
+                          {refreshing === imp.id ? 'Checking...' : 'Check Status'}
+                        </button>
+                      )}
+                      {imp.status === 'succeeded' && (
+                        <>
+                          <button onClick={() => handleRefresh(imp.id)} className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg">Re-check</button>
+                          <Link href="/jobs" className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg">View Jobs →</Link>
+                        </>
+                      )}
+                      {imp.status === 'failed' && (
+                        <button onClick={() => handleRefresh(imp.id)} className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg">Retry</button>
+                      )}
+                    </div>
                   </div>
-
-                  <div className="text-gray-400 text-xs space-y-1">
-                    <p>Created: {new Date(imp.created_at).toLocaleString()}</p>
-                    {imp.status === 'succeeded' && imp.stats ? (
-                      <p>
-                        {imp.stats.inserted} inserted, {(imp.stats.duplicates_by_url || 0) + (imp.stats.duplicates_by_employer_title || 0)} duplicates
-                      </p>
-                    ) : null}
-                    {imp.status === 'failed' && imp.error_message ? (
-                      <p className="text-red-400">Error: {imp.error_message}</p>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="flex gap-2 ml-4">
-                  {(imp.status === 'queued' || imp.status === 'running') && (
-                    <button
-                      onClick={() => handleRefresh(imp.id)}
-                      disabled={refreshing === imp.id}
-                      className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white rounded-lg"
-                    >
-                      {refreshing === imp.id ? 'Refreshing...' : 'Refresh'}
-                    </button>
-                  )}
-
-                  {imp.status === 'succeeded' && (
-                    <>
-                      <button
-                        onClick={() => handleRefresh(imp.id)}
-                        className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg"
-                      >
-                        Refresh
-                      </button>
-                      <Link
-                        href={`/jobs?import_id=${imp.id}`}
-                        className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg"
-                      >
-                        View Jobs
-                      </Link>
-                    </>
-                  )}
-
-                  {imp.status === 'failed' && (
-                    <button
-                      onClick={() => handleRefresh(imp.id)}
-                      className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg"
-                    >
-                      Retry Check
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+                )
+              })}
           </div>
-        )}
+        }
       </div>
     </div>
   )

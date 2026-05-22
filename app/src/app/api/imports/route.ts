@@ -61,9 +61,11 @@ export async function POST(request: NextRequest) {
   }
 
   // Trigger Apify run
+  // Apify URLs use '~' instead of '/' in actor IDs (e.g. websift~seek-job-scraper)
+  const actorIdForUrl = actor.actor_id.replace('/', '~')
   let apifyRunId: string
   try {
-    const resp = await fetch(`https://api.apify.com/v2/acts/${actor.actor_id}/runs`, {
+    const resp = await fetch(`https://api.apify.com/v2/acts/${actorIdForUrl}/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.APIFY_TOKEN}` },
       body: JSON.stringify(apifyInput),

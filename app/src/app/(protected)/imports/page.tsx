@@ -7,6 +7,7 @@ interface KeywordSet {
   id: string
   name: string
   keywords: string[]
+  set_type: string
 }
 
 interface Import {
@@ -27,7 +28,8 @@ const DATE_RANGES = [
 
 export default function ImportsPage() {
   const [imports, setImports] = useState<Import[]>([])
-  const [keywordSets, setKeywordSets] = useState<KeywordSet[]>([])
+  const [searchSets, setSearchSets] = useState<KeywordSet[]>([])
+  const [titleSets, setTitleSets] = useState<KeywordSet[]>([])
   const [triggering, setTriggering] = useState(false)
   const [refreshing, setRefreshing] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -35,7 +37,7 @@ export default function ImportsPage() {
   const [form, setForm] = useState({
     source: 'seek' as 'seek' | 'indeed',
     keyword_set_ids: [] as string[],
-    include_in_title: '',
+    title_set_ids: [] as string[],
     date_range: '30d',
     max_items: 100,
   })
@@ -48,9 +50,13 @@ export default function ImportsPage() {
   }, [])
 
   async function loadKeywordSets() {
-    const res = await fetch('/api/settings/keywords')
-    const d = await res.json()
-    setKeywordSets(d.keyword_sets || [])
+    const [searchRes, titleRes] = await Promise.all([
+      fetch('/api/settings/keywords?set_type=search'),
+      fetch('/api/settings/keywords?set_type=title'),
+    ])
+    const [searchData, titleData] = await Promise.all([searchRes.json(), titleRes.json()])
+    setSearchSets(searchData.keyword_sets || [])
+    setTitleSets(titleData.keyword_sets || [])
   }
 
   async function loadImports() {
@@ -65,13 +71,17 @@ export default function ImportsPage() {
     setError('')
     setSuccess('')
     try {
+      // Collect include_in_title terms from selected title sets
+      const selectedTitleSets = titleSets.filter(s => form.title_set_ids.includes(s.id))
+      const include_in_title = selectedTitleSets.flatMap(s => s.keywords)
+
       const res = await fetch('/api/imports', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source: form.source,
           keyword_set_ids: form.keyword_set_ids,
-          include_in_title: form.include_in_title.split('\n').map(s => s.trim()).filter(Boolean),
+          include_in_title,
           date_range: form.date_range,
           max_items: form.max_items,
         }),
@@ -79,7 +89,7 @@ export default function ImportsPage() {
       const d = await res.json()
       if (!res.ok) { setError(d.error || 'Failed'); return }
       setSuccess(`Import queued! Apify run: ${d.import.apify_run_id}`)
-      setForm(f => ({ ...f, keyword_set_ids: [] }))
+      setForm(f => ({ ...f, keyword_set_ids: [], title_set_ids: [] }))
       loadImports()
     } catch (err) {
       setError(String(err))
@@ -104,6 +114,30 @@ export default function ImportsPage() {
     }
   }
 
+  const KeywordCheckboxList = ({
+    sets, selectedIds, onChange, emptyHref, emptyLabel,
+  }: { sets: KeywordSet[]; selectedIds: string[]; onChange: (id: string, checked: boolean) => void; emptyHref: string; emptyLabel: string }) => (
+    <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 max-h-36 overflow-y-auto space-y-1.5">
+      {sets.length === 0 ? (
+        <p className="text-gray-600 text-xs">
+          No sets yet — <Link href={emptyHref} className="text-indigo-400">{emptyLabel}</Link>.
+        </p>
+      ) : sets.map(set => (
+        <label key={set.id} className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={selectedIds.includes(set.id)}
+            disabled={triggering}
+            onChange={e => onChange(set.id, e.target.checked)}
+            className="w-3.5 h-3.5 accent-indigo-500"
+          />
+          <span className="text-white text-sm">{set.name}</span>
+          <span className="text-gray-600 text-xs">({set.keywords?.length || 0} terms)</span>
+        </label>
+      ))}
+    </div>
+  )
+
   return (
     <div className="max-w-4xl">
       <div className="mb-6">
@@ -122,7 +156,7 @@ export default function ImportsPage() {
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-gray-500 mb-1.5 block">Source</label>
-              <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value as any }))} disabled={triggering}
+              <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value as 'seek' | 'indeed' }))} disabled={triggering}
                 className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50">
                 <option value="seek">Seek</option>
                 <option value="indeed">Indeed</option>
@@ -144,36 +178,38 @@ export default function ImportsPage() {
             </div>
           </div>
 
-          {/* Search Terms (keyword sets) */}
+          {/* Search Terms */}
           <div>
-            <label className="text-xs text-gray-500 mb-1.5 block">Search Terms <span className="text-gray-600">(select keyword sets)</span></label>
-            <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 max-h-36 overflow-y-auto space-y-1.5">
-              {keywordSets.length === 0 ? (
-                <p className="text-gray-600 text-xs">No keyword sets — <Link href="/settings/keywords" className="text-indigo-400">create one in Settings</Link>.</p>
-              ) : keywordSets.map(set => (
-                <label key={set.id} className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={form.keyword_set_ids.includes(set.id)} disabled={triggering}
-                    onChange={e => setForm(f => ({
-                      ...f,
-                      keyword_set_ids: e.target.checked ? [...f.keyword_set_ids, set.id] : f.keyword_set_ids.filter(id => id !== set.id)
-                    }))}
-                    className="w-3.5 h-3.5 accent-indigo-500" />
-                  <span className="text-white text-sm">{set.name}</span>
-                  <span className="text-gray-600 text-xs">({set.keywords?.length || 0} terms)</span>
-                </label>
-              ))}
-            </div>
+            <label className="text-xs text-gray-500 mb-1.5 block">
+              Search Terms <span className="text-gray-600">(select keyword sets)</span>
+            </label>
+            <KeywordCheckboxList
+              sets={searchSets}
+              selectedIds={form.keyword_set_ids}
+              onChange={(id, checked) => setForm(f => ({
+                ...f,
+                keyword_set_ids: checked ? [...f.keyword_set_ids, id] : f.keyword_set_ids.filter(x => x !== id),
+              }))}
+              emptyHref="/settings/keywords"
+              emptyLabel="create one in Keyword Sets"
+            />
           </div>
 
-          {/* Include in Title */}
+          {/* Title Filters */}
           <div>
-            <label className="text-xs text-gray-500 mb-1.5 block">Include (one in title) <span className="text-gray-600">— at least one term must appear in the job title</span></label>
-            <textarea value={form.include_in_title}
-              onChange={e => setForm(f => ({ ...f, include_in_title: e.target.value }))}
-              disabled={triggering}
-              rows={3}
-              placeholder={"teacher aide\nteaching assistant\neducation support\nlearning support"}
-              className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none disabled:opacity-50" />
+            <label className="text-xs text-gray-500 mb-1.5 block">
+              Title Filters <span className="text-gray-600">(at least one term must appear in the job title)</span>
+            </label>
+            <KeywordCheckboxList
+              sets={titleSets}
+              selectedIds={form.title_set_ids}
+              onChange={(id, checked) => setForm(f => ({
+                ...f,
+                title_set_ids: checked ? [...f.title_set_ids, id] : f.title_set_ids.filter(x => x !== id),
+              }))}
+              emptyHref="/settings/keywords"
+              emptyLabel="create a Title Filter set in Keyword Sets"
+            />
           </div>
 
           <button type="submit" disabled={triggering || form.keyword_set_ids.length === 0}

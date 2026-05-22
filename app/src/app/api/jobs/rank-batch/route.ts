@@ -79,11 +79,11 @@ export async function POST(request: NextRequest) {
 
   // Load active ranking prompt and candidate profile
   const [promptResult, profileResult] = await Promise.all([
-    supabase.from('prompt_versions').select('prompt_content').eq('user_id', user.id).eq('prompt_type', 'ranking').eq('is_active', true).single(),
+    supabase.from('prompt_versions').select('content').eq('user_id', user.id).eq('prompt_type', 'ranking').eq('is_active', true).single(),
     supabase.from('candidate_profiles').select('profile_json').eq('user_id', user.id).single(),
   ])
 
-  const systemPrompt = promptResult.data?.prompt_content || DEFAULT_RANKING_PROMPT
+  const systemPrompt = promptResult.data?.content || DEFAULT_RANKING_PROMPT
   const profileJson = profileResult.data?.profile_json ? JSON.stringify(profileResult.data.profile_json, null, 2) : ''
 
   const fullSystemPrompt = profileJson

@@ -1,6 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
+/** Build a seek.com.au search URL from keywords + filters */
+function buildSeekUrl(keywords: string[], include_in_title: string[], date_range: string): string {
+  const base = 'https://www.seek.com.au/jobs'
+  const params = new URLSearchParams()
+  params.set('keywords', keywords.join(' '))
+  params.set('where', 'Melbourne VIC')
+  params.set('distance', '50')
+  if (date_range) {
+    // '1d' → '1', '7d' → '7', '30d' → '30'
+    const days = date_range.replace('d', '')
+    params.set('daterange', days)
+  }
+  // Seek supports filtering by job title via 'jobTitle' param (same as "in title only" checkbox)
+  if (include_in_title.length > 0) {
+    params.set('jobTitle', include_in_title.join(' '))
+  }
+  return `${base}?${params.toString()}`
+}
+
+/** Build an indeed.com.au search URL */
+function buildIndeedUrl(keywords: string[], date_range: string): string {
+  const base = 'https://au.indeed.com/jobs'
+  const params = new URLSearchParams()
+  params.set('q', keywords.join(' '))
+  params.set('l', 'Melbourne VIC')
+  params.set('radius', '50')
+  if (date_range) {
+    const daysMap: Record<string, string> = { '1d': '1', '7d': '7', '30d': '30' }
+    const fromage = daysMap[date_range]
+    if (fromage) params.set('fromage', fromage)
+  }
+  return `${base}?${params.toString()}`
+}
+
 export async function GET() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -35,32 +69,25 @@ export async function POST(request: NextRequest) {
   if (!actor?.actor_id?.trim())
     return NextResponse.json({ error: `Apify actor not configured for ${source}. Go to Settings → Apify Actors.` }, { status: 400 })
 
-  // Load keyword sets
+  // Load keyword sets (search type only)
   const { data: keywordSets } = await supabase
     .from('keyword_sets').select('keywords').eq('user_id', user.id).in('id', keyword_set_ids)
   const allKeywords = (keywordSets || []).flatMap(s => s.keywords || [])
   if (!allKeywords.length)
     return NextResponse.json({ error: 'No keywords found in selected sets' }, { status: 400 })
 
-  // Build Apify input — merge default_input with hardcoded Melbourne filters
+  // Build the search URL for the actor
+  const searchUrl = source === 'seek'
+    ? buildSeekUrl(allKeywords, include_in_title, date_range)
+    : buildIndeedUrl(allKeywords, date_range)
+
+  // Build Apify input — websift actor expects { url, maxItems }
   const apifyInput = {
     ...(actor.default_input || {}),
-    // Search terms
-    query: allKeywords.join(' OR '),
-    keywords: allKeywords,
-    // Title filter
-    ...(include_in_title.length > 0 ? { jobTitleIncludes: include_in_title } : {}),
-    // Hardcoded Melbourne
-    location: 'Melbourne VIC',
-    locationRadius: 50,
-    country: 'AU',
-    // Filters
-    sortBy: 'relevance',
-    ...(date_range ? { dateRange: date_range, postedIn: date_range } : {}),
+    url: searchUrl,
     maxItems: Math.min(max_items, 500),
   }
 
-  // Trigger Apify run
   // Apify URLs use '~' instead of '/' in actor IDs (e.g. websift~seek-job-scraper)
   const actorIdForUrl = actor.actor_id.replace('/', '~')
   let apifyRunId: string
@@ -73,7 +100,7 @@ export async function POST(request: NextRequest) {
     if (!resp.ok) {
       const txt = await resp.text()
       console.error('Apify error:', resp.status, txt)
-      return NextResponse.json({ error: `Apify error: ${resp.statusText}` }, { status: 500 })
+      return NextResponse.json({ error: `Apify error: ${resp.statusText} — ${txt}` }, { status: 500 })
     }
     const apifyData = await resp.json()
     apifyRunId = apifyData.data?.id

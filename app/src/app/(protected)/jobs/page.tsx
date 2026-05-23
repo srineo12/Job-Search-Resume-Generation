@@ -153,9 +153,9 @@ export default function JobsPage() {
   const [ranking, setRanking]   = useState(false)
   const [rankMsg, setRankMsg]   = useState('')
 
-  // Filters
-  const [priFilter,  setPriFilter]  = useState('all')
-  const [wfFilter,   setWfFilter]   = useState('all')
+  // Filters — multi-select Sets; empty Set = show all
+  const [priFilters,  setPriFilters]  = useState<Set<string>>(new Set())
+  const [wfFilters,   setWfFilters]   = useState<Set<string>>(new Set())
   const [colFilters, setColFilters] = useState<Record<string, string>>({})
   const [scoreMin,   setScoreMin]   = useState('')
 
@@ -186,11 +186,14 @@ export default function JobsPage() {
   // ── Filter + sort pipeline ────────────────────────────────────────────────
   const visible = jobs
     .filter(j => {
-      if (priFilter !== 'all') {
-        if (priFilter === 'unranked' && j.ai_ranked_at) return false
-        if (priFilter !== 'unranked' && j.ai_priority !== priFilter) return false
+      // Priority multi-select (empty = show all)
+      if (priFilters.size > 0) {
+        const matchesPri = priFilters.has(j.ai_priority ?? '') ||
+          (priFilters.has('unranked') && !j.ai_ranked_at)
+        if (!matchesPri) return false
       }
-      if (wfFilter !== 'all' && wfOf(j.status) !== wfFilter) return false
+      // Workflow multi-select (empty = show all)
+      if (wfFilters.size > 0 && !wfFilters.has(wfOf(j.status))) return false
       if (colFilters.title     && !j.title?.toLowerCase().includes(colFilters.title.toLowerCase()))    return false
       if (colFilters.employer  && !j.employer?.toLowerCase().includes(colFilters.employer.toLowerCase())) return false
       if (colFilters.location  && !j.location?.toLowerCase().includes(colFilters.location.toLowerCase())) return false
@@ -298,11 +301,11 @@ export default function JobsPage() {
   }
 
   // ── Rank all ──────────────────────────────────────────────────────────────
-  async function handleRankAll() {
+  async function handleRankAll(force = false) {
     setRanking(true); let total = 0
     while (true) {
       setRankMsg(`Ranking… ${total} done`)
-      const res = await fetch('/api/jobs/rank-batch', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({limit:20}) })
+      const res = await fetch('/api/jobs/rank-batch', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({limit:20, force}) })
       const d = await res.json()
       total += d.ranked || 0
       if (!d.ranked || d.remaining === 0) {
@@ -357,9 +360,14 @@ export default function JobsPage() {
               <button onClick={() => bulkWorkflow('open')}      className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg">↺ Re-open</button>
             </>
           )}
-          <button onClick={handleRankAll} disabled={ranking || counts.unranked === 0}
+          <button onClick={() => handleRankAll(false)} disabled={ranking || counts.unranked === 0}
             className="px-4 py-1.5 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white text-xs font-medium rounded-lg">
             {ranking ? '⚙️ Ranking…' : `⚡ Rank All (${counts.unranked})`}
+          </button>
+          <button onClick={() => handleRankAll(true)} disabled={ranking}
+            title="Re-rank all jobs (including already ranked)"
+            className="px-3 py-1.5 bg-purple-900 hover:bg-purple-800 disabled:opacity-40 text-purple-300 text-xs font-medium rounded-lg">
+            ↺ Re-rank
           </button>
           <button onClick={handleSaveLayout}
             className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${layoutSaved ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
@@ -373,40 +381,54 @@ export default function JobsPage() {
       )}
 
       {/* ── Filter bar ── */}
-      <div className="flex flex-wrap gap-2 mb-3">
-        {/* Priority filters */}
+      <div className="flex flex-wrap gap-2 mb-3 items-center">
+        {/* Priority multi-select */}
+        <span className="text-gray-600 text-xs">Priority:</span>
         <div className="flex gap-1">
-          {[
-            { k:'all',      l:`All (${counts.total})` },
-            { k:'hot',      l:`🔥 ${counts.hot}` },
-            { k:'good',     l:`✅ ${counts.good}` },
-            { k:'maybe',    l:`🤔 ${counts.maybe}` },
-            { k:'avoid',    l:`❌ ${counts.avoid}` },
-            { k:'unranked', l:`⏳ ${counts.unranked}` },
-          ].map(t => (
-            <button key={t.k} onClick={() => setPriFilter(t.k)}
-              className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors ${priFilter===t.k ? 'bg-indigo-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}>
-              {t.l}
-            </button>
-          ))}
+          {([
+            { k:'hot',      l:`🔥 Hot (${counts.hot})` },
+            { k:'good',     l:`✅ Good (${counts.good})` },
+            { k:'maybe',    l:`🤔 Maybe (${counts.maybe})` },
+            { k:'avoid',    l:`❌ Avoid (${counts.avoid})` },
+            { k:'unranked', l:`⏳ Unranked (${counts.unranked})` },
+          ] as {k:string,l:string}[]).map(t => {
+            const on = priFilters.has(t.k)
+            return (
+              <button key={t.k}
+                onClick={() => setPriFilters(s => { const n = new Set(s); n.has(t.k) ? n.delete(t.k) : n.add(t.k); return n })}
+                className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors border ${on ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-800'}`}>
+                {t.l}
+              </button>
+            )
+          })}
+          {priFilters.size > 0 && (
+            <button onClick={() => setPriFilters(new Set())} className="px-2 py-1 text-xs text-gray-500 hover:text-gray-300">✕</button>
+          )}
         </div>
 
-        <div className="w-px bg-gray-700" />
+        <div className="w-px bg-gray-700 self-stretch" />
 
-        {/* Workflow status filters */}
+        {/* Workflow status multi-select */}
+        <span className="text-gray-600 text-xs">Status:</span>
         <div className="flex gap-1">
-          {[
-            { k:'all',       l:`All` },
+          {([
             { k:'open',      l:`Open (${counts.open})` },
             { k:'generated', l:`Generated (${counts.generated})` },
             { k:'applied',   l:`Applied (${counts.applied})` },
             { k:'discarded', l:`Discarded (${counts.discarded})` },
-          ].map(t => (
-            <button key={t.k} onClick={() => setWfFilter(t.k)}
-              className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors ${wfFilter===t.k ? 'bg-indigo-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}>
-              {t.l}
-            </button>
-          ))}
+          ] as {k:string,l:string}[]).map(t => {
+            const on = wfFilters.has(t.k)
+            return (
+              <button key={t.k}
+                onClick={() => setWfFilters(s => { const n = new Set(s); n.has(t.k) ? n.delete(t.k) : n.add(t.k); return n })}
+                className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors border ${on ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-800'}`}>
+                {t.l}
+              </button>
+            )
+          })}
+          {wfFilters.size > 0 && (
+            <button onClick={() => setWfFilters(new Set())} className="px-2 py-1 text-xs text-gray-500 hover:text-gray-300">✕</button>
+          )}
         </div>
       </div>
 

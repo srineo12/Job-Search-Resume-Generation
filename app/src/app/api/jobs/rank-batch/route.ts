@@ -60,17 +60,21 @@ export async function POST(request: NextRequest) {
   const log = makeLogger(supabase, 'rank-batch', user.id)
 
   const body = await request.json()
-  const { job_ids, import_id, limit = 20 } = body
-  await log.info('rank-batch started', { job_ids, import_id, limit, user_id: user.id })
+  const { job_ids, import_id, limit = 20, force = false } = body
+  await log.info('rank-batch started', { job_ids, import_id, limit, force, user_id: user.id })
 
   // Fetch jobs to rank
   let query = supabase
     .from('jobs')
     .select('id, title, employer, location, work_type, salary_text, description_text, posted_at, status')
     .eq('user_id', user.id)
-    .is('ai_ranked_at', null)
     .neq('status', 'skipped')
     .limit(limit)
+
+  // Unless force=true, only fetch unranked jobs
+  if (!force) {
+    query = query.is('ai_ranked_at', null)
+  }
 
   if (job_ids?.length) {
     query = query.in('id', job_ids)
@@ -109,9 +113,38 @@ export async function POST(request: NextRequest) {
 
   const systemPrompt = promptResult.data?.content || DEFAULT_RANKING_PROMPT
   const profileJson = profileResult.data?.profile_json ? JSON.stringify(profileResult.data.profile_json, null, 2) : ''
-  const fullSystemPrompt = profileJson
-    ? `${systemPrompt}\n\nCANDIDATE PROFILE (use this for context, not as strict requirements):\n${profileJson}`
-    : systemPrompt
+
+  // Always append required JSON schema — ensures ranking_comments/role_description
+  // are returned even if the active DB prompt doesn't define them
+  const REQUIRED_JSON_SCHEMA = `
+
+RESPOND WITH VALID JSON ONLY (no markdown). Include ALL of these fields:
+{
+  "priority": "hot|good|maybe|avoid",
+  "score": 0-100,
+  "beginner_friendly": "yes|no|unclear",
+  "gto_traineeship": "yes|no|unclear",
+  "training_offered": "yes|no|unclear",
+  "cert3_pathway": "yes|no|unclear",
+  "prior_school_required": "yes|no|unclear",
+  "qualification_risk": "low|medium|high",
+  "experience_risk": "low|medium|high",
+  "recommended_action": "apply|review_carefully|skip",
+  "resume_version": "school_support|admin_customer_service|reception|avoid",
+  "cover_letter_needed": "yes|no",
+  "reason": "1-2 sentence explanation of priority",
+  "key_skills": "top 3 matching skills from this job",
+  "red_flags": "any disqualifying requirements or concerns",
+  "tailoring_notes": "specific tip for applying to this role",
+  "ranking_comments": ["bullet: why score is high or low", "bullet: key factor", "bullet: any risk or boost"],
+  "role_description": ["bullet: what the role involves day-to-day", "bullet: type of work/environment", "bullet: who they support or work with"]
+}`
+
+  const fullSystemPrompt = [
+    systemPrompt,
+    profileJson ? `\nCANDIDATE PROFILE (use for context, not strict requirements):\n${profileJson}` : '',
+    REQUIRED_JSON_SCHEMA,
+  ].filter(Boolean).join('\n')
 
   const openaiKey = process.env.OPENAI_API_KEY
   await log.info('openai config', { keyPresent: !!openaiKey, keyPrefix: openaiKey?.slice(0, 12) ?? 'MISSING', model: process.env.OPENAI_MODEL || 'gpt-4o-mini' })

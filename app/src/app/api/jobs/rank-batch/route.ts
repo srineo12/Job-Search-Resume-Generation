@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
+import { makeLogger } from '@/lib/logger'
 import OpenAI from 'openai'
 
 const DEFAULT_RANKING_PROMPT = `You are ranking job listings for Priyadharshini Selvam to identify the best opportunities in Melbourne, Australia.
@@ -48,16 +49,19 @@ Respond ONLY with valid JSON (no markdown, no explanation):
   "key_skills": "top 3 matching skills from this job",
   "red_flags": "any disqualifying requirements or concerns",
   "tailoring_notes": "specific tip for applying to this role",
-  "ranking_comments": ["bullet 1: why score is high or low", "bullet 2: key factor", "bullet 3: any risk or boost"],
-  "role_description": ["bullet 1: what the role involves day-to-day", "bullet 2: type of work/environment", "bullet 3: who they support or work with"]
+  "ranking_comments": ["bullet: why score is high or low", "bullet: key factor", "bullet: any risk or boost"],
+  "role_description": ["bullet: what the role involves day-to-day", "bullet: type of work/environment", "bullet: who they support or work with"]
 }`
 
 export async function POST(request: NextRequest) {
   const { supabase, user } = await getAuth()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const log = makeLogger(supabase, 'rank-batch', user.id)
+
   const body = await request.json()
   const { job_ids, import_id, limit = 20 } = body
+  await log.info('rank-batch started', { job_ids, import_id, limit, user_id: user.id })
 
   // Fetch jobs to rank
   let query = supabase
@@ -75,23 +79,44 @@ export async function POST(request: NextRequest) {
   }
 
   const { data: jobs, error: fetchErr } = await query
-  if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 })
-  if (!jobs?.length) return NextResponse.json({ ranked: 0, remaining: 0, message: 'No unranked jobs found' })
+  if (fetchErr) {
+    await log.error('jobs fetch failed', { error: fetchErr.message, code: fetchErr.code })
+    return NextResponse.json({ error: fetchErr.message }, { status: 500 })
+  }
+
+  await log.info('jobs fetched for ranking', { count: jobs?.length ?? 0, titles: jobs?.map(j => j.title) })
+
+  if (!jobs?.length) {
+    // Check total unranked to distinguish "already all ranked" from "query broken"
+    const { count: totalUnranked } = await supabase
+      .from('jobs').select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id).is('ai_ranked_at', null)
+    await log.warn('no jobs returned by rank query', { totalUnrankedIgnoringStatusFilter: totalUnranked })
+    return NextResponse.json({ ranked: 0, remaining: 0, message: 'No unranked jobs found' })
+  }
 
   // Load active ranking prompt and candidate profile
   const [promptResult, profileResult] = await Promise.all([
     supabase.from('prompt_versions').select('content').eq('user_id', user.id).eq('prompt_type', 'ranking').eq('is_active', true).single(),
     supabase.from('candidate_profiles').select('profile_json').eq('user_id', user.id).single(),
   ])
+  await log.info('prompt + profile loaded', {
+    promptFound: !!promptResult.data,
+    promptError: promptResult.error?.message,
+    profileFound: !!profileResult.data,
+    profileError: profileResult.error?.message,
+  })
 
   const systemPrompt = promptResult.data?.content || DEFAULT_RANKING_PROMPT
   const profileJson = profileResult.data?.profile_json ? JSON.stringify(profileResult.data.profile_json, null, 2) : ''
-
   const fullSystemPrompt = profileJson
     ? `${systemPrompt}\n\nCANDIDATE PROFILE (use this for context, not as strict requirements):\n${profileJson}`
     : systemPrompt
 
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const openaiKey = process.env.OPENAI_API_KEY
+  await log.info('openai config', { keyPresent: !!openaiKey, keyPrefix: openaiKey?.slice(0, 12) ?? 'MISSING', model: process.env.OPENAI_MODEL || 'gpt-4o-mini' })
+
+  const openai = new OpenAI({ apiKey: openaiKey })
 
   let ranked = 0
   const errors: string[] = []
@@ -108,6 +133,8 @@ export async function POST(request: NextRequest) {
         `Description:\n${(job.description_text || '').slice(0, 3000)}`,
       ].join('\n')
 
+      await log.info('calling openai for job', { jobId: job.id, title: job.title })
+
       const completion = await openai.chat.completions.create({
         model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
         messages: [
@@ -122,11 +149,13 @@ export async function POST(request: NextRequest) {
       let ranking: Record<string, unknown>
       try { ranking = JSON.parse(rawResponse) } catch { ranking = {} }
 
+      await log.info('openai response received', { jobId: job.id, priority: ranking.priority, score: ranking.score })
+
       const score = typeof ranking.score === 'number' ? ranking.score : parseInt(String(ranking.score)) || 0
       const priority = ['hot', 'good', 'maybe', 'avoid'].includes(String(ranking.priority))
         ? String(ranking.priority) : 'maybe'
 
-      await supabase.from('jobs').update({
+      const { error: updateErr } = await supabase.from('jobs').update({
         ai_score: score,
         ai_priority: priority,
         ai_ranking: ranking,
@@ -134,10 +163,16 @@ export async function POST(request: NextRequest) {
         status: job.status === 'imported' ? 'ranked' : job.status,
       }).eq('id', job.id)
 
-      ranked++
+      if (updateErr) {
+        await log.error('supabase update failed', { jobId: job.id, error: updateErr.message })
+        errors.push(`${job.title}: DB update failed — ${updateErr.message}`)
+      } else {
+        ranked++
+        await log.info('job ranked and saved', { jobId: job.id, priority, score })
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      console.error(`Error ranking job ${job.id}:`, msg)
+      await log.error('job ranking threw', { jobId: job.id, title: job.title, error: msg })
       errors.push(`${job.title}: ${msg}`)
     }
   }
@@ -149,6 +184,8 @@ export async function POST(request: NextRequest) {
     .eq('user_id', user.id)
     .is('ai_ranked_at', null)
     .neq('status', 'skipped')
+
+  await log.info('rank-batch complete', { ranked, errors: errors.length, remaining })
 
   return NextResponse.json({
     ranked,

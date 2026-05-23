@@ -766,13 +766,6 @@ export default function JobsPage() {
                                     ✉️ Apply directly
                                   </a>
                                 )}
-                                <div className="flex flex-wrap gap-1.5 pt-1">
-                                  {wf !== 'generated' && <button onClick={() => setWorkflow(job.id,'generated')} className="px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white text-xs rounded-lg">📄 Generate</button>}
-                                  {wf !== 'applied'   && <button onClick={() => setWorkflow(job.id,'applied',job.url)} className="px-3 py-1.5 bg-green-900 hover:bg-green-800 text-white text-xs rounded-lg">✓ Apply</button>}
-                                  {wf !== 'discarded' && <button onClick={() => setWorkflow(job.id,'discarded')} className="px-3 py-1.5 bg-red-950 hover:bg-red-900 text-red-300 text-xs rounded-lg">✗ Discard</button>}
-                                  {wf !== 'open'      && <button onClick={() => setWorkflow(job.id,'open')} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg">↺ Re-open</button>}
-                                  <button onClick={() => handleDeleteJob(job.id)} className="px-3 py-1.5 bg-gray-900 hover:bg-red-950 text-red-400 text-xs rounded-lg">🗑 Delete</button>
-                                </div>
                               </div>
                             </div>
                           </div>

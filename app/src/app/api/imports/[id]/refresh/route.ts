@@ -141,29 +141,28 @@ export async function GET(
     return NextResponse.json({ error: 'Unknown source' }, { status: 400 })
   }
 
-  // Process jobs with deduplication
-  // Title post-filter: if include_in_title terms were saved, only keep jobs
-  // whose title contains at least one term (case-insensitive)
+  // Count how many jobs don't match title filter (for informational stats only).
+  // We insert ALL jobs regardless — AI ranking assigns low scores to irrelevant ones.
   const titleFilterTerms: string[] = (importRecord.input_payload?.include_in_title || [])
     .map((t: string) => t.toLowerCase().trim())
     .filter(Boolean)
 
-  const titleFilteredJobs = titleFilterTerms.length > 0
+  const titleFilteredCount = titleFilterTerms.length > 0
     ? normalizedJobs.filter(job =>
-        titleFilterTerms.some(term => job.title.toLowerCase().includes(term))
-      )
-    : normalizedJobs
+        !titleFilterTerms.some(term => job.title.toLowerCase().includes(term))
+      ).length
+    : 0
 
   let stats = {
     fetched: rawJobs.length,
-    title_filtered: rawJobs.length - titleFilteredJobs.length,
+    title_filtered: titleFilteredCount,
     inserted: 0,
     duplicates_by_url: 0,
     duplicates_by_employer_title: 0,
     errors: 0,
   }
 
-  for (const normalizedJob of titleFilteredJobs) {
+  for (const normalizedJob of normalizedJobs) {
     try {
       // Check for duplicate by URL hash
       const { data: byUrl } = await supabase

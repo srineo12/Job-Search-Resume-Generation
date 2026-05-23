@@ -2,8 +2,10 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
-  // Auth bypass mode — set DISABLE_AUTH=false in env to re-enable login
-  if (process.env.DISABLE_AUTH === 'true') {
+  // Auth bypass — NEXT_PUBLIC_DISABLE_AUTH must be used (not DISABLE_AUTH)
+  // because Next.js middleware runs in Edge runtime where only NEXT_PUBLIC_ vars
+  // are available at runtime. Set to 'false' to re-enable login.
+  if (process.env.NEXT_PUBLIC_DISABLE_AUTH === 'true') {
     return NextResponse.next({ request })
   }
 

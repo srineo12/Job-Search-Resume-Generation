@@ -10,7 +10,7 @@ import { createClient as createAnonClient } from './server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 
 export async function getAuth() {
-  if (process.env.DISABLE_AUTH === 'true') {
+  if (process.env.NEXT_PUBLIC_DISABLE_AUTH === 'true' || process.env.DISABLE_AUTH === 'true') {
     const userId = process.env.BYPASS_USER_ID
     if (!userId) throw new Error('DISABLE_AUTH=true but BYPASS_USER_ID is not set')
     const supabase = createServiceClient(

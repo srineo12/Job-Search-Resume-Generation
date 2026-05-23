@@ -44,6 +44,10 @@ interface Job {
     workArrangements?: string
     jobLink?: string
     applyLink?: string
+    isExternalApply?: boolean
+    isVerified?: boolean
+    listedAt?: string
+    expiresAtUtc?: string
     joblocationInfo?: {
       area?: string
       displayLocation?: string
@@ -51,6 +55,17 @@ interface Job {
       suburb?: string
       country?: string
     }
+    classificationInfo?: {
+      classification?: string
+      subClassification?: string
+    }
+    content?: {
+      jobHook?: string
+      bulletPoints?: string[]
+      sections?: string[]
+      unEditedContent?: string
+    }
+    employerQuestions?: string[]
     [key: string]: unknown
   } | null
 }
@@ -413,6 +428,8 @@ export default function JobsPage() {
                               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                                 {[
                                   ['Employer', job.employer],
+                                  ['Category', rp.classificationInfo?.classification],
+                                  ['Sub-Category', rp.classificationInfo?.subClassification],
                                   ['Area', rp.joblocationInfo?.area],
                                   ['Suburb', rp.joblocationInfo?.suburb],
                                   ['Location', rp.joblocationInfo?.displayLocation || job.location],
@@ -423,6 +440,9 @@ export default function JobsPage() {
                                   ['Resume %', rp.resumePercentage != null ? `${rp.resumePercentage}%` : undefined],
                                   ['Cover Letter %', rp.coverLetterPercentage != null ? `${rp.coverLetterPercentage}%` : undefined],
                                   ['Posted', job.posted_at ? new Date(job.posted_at).toLocaleDateString('en-AU') : undefined],
+                                  ['Expires', rp.expiresAtUtc ? new Date(rp.expiresAtUtc).toLocaleDateString('en-AU') : undefined],
+                                  ['External Apply', rp.isExternalApply ? 'Yes' : rp.isExternalApply === false ? 'No' : undefined],
+                                  ['Verified', rp.isVerified ? '✓ Yes' : rp.isVerified === false ? 'No' : undefined],
                                   ['Source', job.source],
                                 ].filter(([, v]) => v != null && v !== '').map(([label, val]) => (
                                   <div key={label as string}>
@@ -431,6 +451,17 @@ export default function JobsPage() {
                                   </div>
                                 ))}
                               </div>
+                              {/* Employer Questions */}
+                              {Array.isArray(rp.employerQuestions) && rp.employerQuestions.length > 0 && (
+                                <div className="pt-2 border-t border-gray-800">
+                                  <p className="text-xs text-gray-500 mb-1">Employer Questions ({rp.employerQuestions.length})</p>
+                                  <ul className="space-y-0.5">
+                                    {rp.employerQuestions.map((q, i) => (
+                                      <li key={i} className="text-xs text-yellow-300">• {q}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
                             </div>
 
                             {/* Panel 3: Links + Actions */}

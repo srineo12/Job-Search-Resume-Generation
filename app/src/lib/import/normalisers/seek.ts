@@ -4,37 +4,67 @@ import {
   generateUrlHash,
   generateDedupeKey,
   stripHtml,
-  extractString,
-  extractBoolean,
-  extractDate,
 } from './base'
 
 /**
- * Normalize a single Seek job from Apify into canonical format
+ * Normalize a single Seek job from websift/seek-job-scraper Apify actor.
+ *
+ * Actual field names from the actor (confirmed from live data):
+ *   id             → source_job_id
+ *   title          → title
+ *   advertiser.name → employer
+ *   joblocationInfo.location / suburb → location
+ *   jobLink        → url  (NOT 'url')
+ *   salary         → salary_text
+ *   workTypes      → work_type
+ *   workArrangements → remote indicator
+ *   content.unEditedContent → description_html
+ *   content.sections → description_text fallback
+ *   listedAt       → posted_at  (NOT 'postedDate')
  */
 export function normalizeSeekJob(raw: any): NormalizedJob {
-  // Extract URL and generate hash
-  const urlString = extractString(raw, 'url', '')
+  // URL — field is 'jobLink', not 'url'
+  const urlString = raw.jobLink || raw.url || raw.applyLink || ''
   const canonUrl = canonicalizeUrl(urlString)
   const urlHash = generateUrlHash(canonUrl)
 
-  // Extract basic job info
-  const sourceJobId = extractString(raw, 'id') || extractString(raw, 'jobId', '')
-  const employer = extractString(raw, 'company', '')
-  const title = extractString(raw, 'title', '')
-  const location = extractString(raw, 'location', '')
-  const remoteFlag = extractBoolean(raw, 'remote')
+  // Source ID
+  const sourceJobId = String(raw.id || raw.jobId || '')
 
-  // Generate dedupe key
+  // Employer — nested under advertiser.name
+  const employer = raw.advertiser?.name || raw.company || raw.employer || ''
+
+  // Title
+  const title = raw.title || ''
+
+  // Location — nested under joblocationInfo
+  const locInfo = raw.joblocationInfo || {}
+  const location = locInfo.displayLocation || locInfo.location
+    ? `${locInfo.suburb || ''} ${locInfo.location || ''}`.trim()
+    : (raw.location || '')
+
+  // Remote flag
+  const remoteFlag = typeof raw.workArrangements === 'string'
+    ? raw.workArrangements.toLowerCase().includes('remote')
+    : false
+
+  // Salary
+  const salaryText = raw.salary || ''
+
+  // Work type
+  const workType = raw.workTypes || raw.workType || ''
+
+  // Description — field is content.unEditedContent, not 'description'
+  const descriptionHtml = raw.content?.unEditedContent || raw.description || ''
+  const descriptionText = descriptionHtml
+    ? stripHtml(descriptionHtml)
+    : Array.isArray(raw.content?.sections) ? raw.content.sections.join('\n') : ''
+
+  // Posted date — field is 'listedAt', not 'postedDate'
+  const postedAtRaw = raw.listedAt || raw.postedDate || raw.datePosted || null
+  const postedAt = postedAtRaw ? new Date(postedAtRaw) : null
+
   const dedupeKey = generateDedupeKey(employer, title, location)
-
-  // Extract salary and description
-  const salaryText = extractString(raw, 'salary', '')
-  const descriptionHtml = extractString(raw, 'description', '')
-  const descriptionText = stripHtml(descriptionHtml)
-
-  // Extract posted date
-  const postedAt = extractDate(raw, 'postedDate') || extractDate(raw, 'datePosted')
 
   return {
     source_job_id: sourceJobId,
@@ -45,6 +75,7 @@ export function normalizeSeekJob(raw: any): NormalizedJob {
     location,
     remote_flag: remoteFlag,
     salary_text: salaryText || null,
+    work_type: workType || null,
     description_text: descriptionText,
     description_html: descriptionHtml || null,
     posted_at: postedAt,
@@ -53,9 +84,6 @@ export function normalizeSeekJob(raw: any): NormalizedJob {
   }
 }
 
-/**
- * Normalize an array of Seek jobs
- */
 export function normalizeSeekJobs(rawJobs: any[]): NormalizedJob[] {
   return (Array.isArray(rawJobs) ? rawJobs : [])
     .filter((job) => job && typeof job === 'object')
@@ -63,9 +91,9 @@ export function normalizeSeekJobs(rawJobs: any[]): NormalizedJob[] {
       try {
         return normalizeSeekJob(job)
       } catch (error) {
-        console.error('Error normalizing Seek job:', error, job)
-        // Return a minimal job to track the error
-        return normalizeSeekJob({ ...job, _normalize_error: String(error) })
+        console.error('Error normalizing Seek job:', error)
+        return null
       }
     })
+    .filter(Boolean) as NormalizedJob[]
 }

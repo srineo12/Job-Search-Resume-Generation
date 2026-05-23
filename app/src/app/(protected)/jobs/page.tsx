@@ -11,6 +11,7 @@ interface Job {
   salary_text: string
   posted_at: string
   url: string
+  source: string
   status: string
   ai_score: number | null
   ai_priority: 'hot' | 'good' | 'maybe' | 'avoid' | null
@@ -31,16 +32,13 @@ interface Job {
 }
 
 const PRIORITY_STYLES: Record<string, string> = {
-  hot: 'bg-red-900 text-red-300 border-red-700',
-  good: 'bg-green-900 text-green-300 border-green-700',
-  maybe: 'bg-yellow-900 text-yellow-300 border-yellow-700',
+  hot: 'bg-red-900/60 text-red-300 border-red-700',
+  good: 'bg-green-900/60 text-green-300 border-green-700',
+  maybe: 'bg-yellow-900/60 text-yellow-300 border-yellow-700',
   avoid: 'bg-gray-800 text-gray-500 border-gray-700',
 }
 const PRIORITY_LABELS: Record<string, string> = {
   hot: '🔥 Hot', good: '✅ Good', maybe: '🤔 Maybe', avoid: '❌ Avoid',
-}
-const ACTION_STYLES: Record<string, string> = {
-  apply: 'text-green-400', review_carefully: 'text-yellow-400', skip: 'text-gray-500',
 }
 
 function relativeDate(dateStr: string) {
@@ -51,6 +49,12 @@ function relativeDate(dateStr: string) {
   if (d === 1) return '1d ago'
   if (d < 30) return `${d}d ago`
   return new Date(dateStr).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
+}
+
+function ScoreBadge({ score }: { score: number | null }) {
+  if (score == null) return <span className="text-gray-700 text-sm">—</span>
+  const color = score >= 70 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-red-400'
+  return <span className={`text-base font-bold ${color}`}>{score}</span>
 }
 
 export default function JobsPage() {
@@ -103,7 +107,7 @@ export default function JobsPage() {
     setRanking(true)
     let total = 0
     while (true) {
-      setRankProgress(`Ranked ${total} jobs, processing next batch...`)
+      setRankProgress(`Ranking... ${total} done so far`)
       const res = await fetch('/api/jobs/rank-batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -112,7 +116,7 @@ export default function JobsPage() {
       const d = await res.json()
       total += d.ranked || 0
       if (!d.ranked || d.remaining === 0) break
-      setRankProgress(`Ranked ${total} jobs... ${d.remaining} remaining`)
+      setRankProgress(`Ranked ${total}... ${d.remaining} remaining`)
     }
     setRankProgress(`Done! Ranked ${total} jobs.`)
     loadJobs()
@@ -122,7 +126,7 @@ export default function JobsPage() {
   async function handleRankSelected() {
     if (!selected.size) return
     setRanking(true)
-    setRankProgress(`Ranking ${selected.size} selected jobs...`)
+    setRankProgress(`Ranking ${selected.size} selected...`)
     const res = await fetch('/api/jobs/rank-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -138,7 +142,6 @@ export default function JobsPage() {
   function toggleSelect(id: string) {
     setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
-
   function toggleAll() {
     if (selected.size === filtered.length) setSelected(new Set())
     else setSelected(new Set(filtered.map(j => j.id)))
@@ -147,20 +150,21 @@ export default function JobsPage() {
   return (
     <div className="max-w-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-2xl font-bold text-white">Jobs</h1>
-          <p className="text-gray-400 text-sm mt-1">{counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unranked</p>
+          <p className="text-gray-400 text-sm mt-0.5">
+            {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unranked
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
           {selected.size > 0 && (
             <>
               <button onClick={handleRankSelected} disabled={ranking}
                 className="px-4 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg">
                 Rank {selected.size} selected
               </button>
-              <button
-                onClick={() => alert(`Generate docs for ${selected.size} jobs — coming in Phase 6`)}
+              <button onClick={() => alert(`Generate docs for ${selected.size} jobs — coming in Phase 6`)}
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg">
                 📄 Generate Resume+Cover ({selected.size})
               </button>
@@ -178,8 +182,8 @@ export default function JobsPage() {
       )}
 
       {/* Filter tabs + sort */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex gap-1">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex gap-1 flex-wrap">
           {[
             { key: 'all', label: `All (${counts.total})` },
             { key: 'hot', label: `🔥 Hot (${counts.hot})` },
@@ -196,7 +200,7 @@ export default function JobsPage() {
             </button>
           ))}
         </div>
-        <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}
+        <select value={sortBy} onChange={e => setSortBy(e.target.value as 'score' | 'posted')}
           className="px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-gray-300 text-xs focus:outline-none">
           <option value="score">Sort by Score</option>
           <option value="posted">Sort by Date Posted</option>
@@ -215,122 +219,130 @@ export default function JobsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wider">
-                <th className="px-4 py-3 text-left w-8">
+                <th className="px-3 py-3 w-8">
                   <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0}
                     onChange={toggleAll} className="accent-indigo-500" />
                 </th>
+                {/* CRITICAL: Title & Employer first */}
+                <th className="px-3 py-3 text-left">Job Title</th>
+                <th className="px-3 py-3 text-left w-36">Employer</th>
+                <th className="px-3 py-3 text-left w-32">Location</th>
+                <th className="px-3 py-3 text-center w-14">Score</th>
                 <th className="px-3 py-3 text-left w-24">Priority</th>
-                <th className="px-3 py-3 text-left w-12">Score</th>
-                <th className="px-3 py-3 text-left">Title & Employer</th>
-                <th className="px-3 py-3 text-left w-28">Type / Salary</th>
-                <th className="px-3 py-3 text-left w-20">Posted</th>
-                <th className="px-3 py-3 text-left w-28">Action</th>
-                <th className="px-3 py-3 text-left w-20">Info</th>
+                <th className="px-3 py-3 text-left w-24">Salary</th>
+                <th className="px-3 py-3 text-left w-20">Type</th>
+                <th className="px-3 py-3 text-left w-16">Posted</th>
+                <th className="px-3 py-3 text-left w-20">Action</th>
+                <th className="px-3 py-3 w-14"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-800">
+            <tbody className="divide-y divide-gray-800/60">
               {filtered.map(job => (
                 <>
                   <tr key={job.id}
-                    className={`hover:bg-gray-800/50 transition-colors cursor-pointer ${selected.has(job.id) ? 'bg-indigo-950/30' : ''}`}
-                    onClick={() => toggleSelect(job.id)}>
-                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                    className={`hover:bg-gray-800/40 transition-colors ${selected.has(job.id) ? 'bg-indigo-950/20' : ''}`}>
+                    <td className="px-3 py-3 text-center">
                       <input type="checkbox" checked={selected.has(job.id)}
                         onChange={() => toggleSelect(job.id)} className="accent-indigo-500" />
                     </td>
+                    {/* Title — clickable, links to job */}
+                    <td className="px-3 py-3 max-w-xs">
+                      <a href={job.url} target="_blank" rel="noopener noreferrer"
+                        className="text-white font-medium hover:text-indigo-300 transition-colors line-clamp-2 leading-snug">
+                        {job.title || '(no title)'}
+                      </a>
+                      {job.ai_ranking?.reason && (
+                        <p className="text-gray-500 text-xs mt-0.5 line-clamp-1 italic">{job.ai_ranking.reason}</p>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 text-gray-300 text-xs max-w-[144px] truncate">{job.employer || '—'}</td>
+                    <td className="px-3 py-3 text-gray-400 text-xs max-w-[128px] truncate">{job.location || '—'}</td>
+                    <td className="px-3 py-3 text-center"><ScoreBadge score={job.ai_score} /></td>
                     <td className="px-3 py-3">
                       {job.ai_priority ? (
-                        <span className={`text-xs px-2 py-1 rounded-full border font-medium ${PRIORITY_STYLES[job.ai_priority]}`}>
+                        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${PRIORITY_STYLES[job.ai_priority]}`}>
                           {PRIORITY_LABELS[job.ai_priority]}
                         </span>
                       ) : <span className="text-gray-600 text-xs">Unranked</span>}
                     </td>
-                    <td className="px-3 py-3">
-                      {job.ai_score != null ? (
-                        <span className={`text-lg font-bold ${
-                          job.ai_score >= 70 ? 'text-green-400' : job.ai_score >= 50 ? 'text-yellow-400' : 'text-gray-500'
-                        }`}>{job.ai_score}</span>
-                      ) : <span className="text-gray-700">—</span>}
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex flex-col gap-0.5">
-                        <a href={job.url} target="_blank" rel="noopener noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          className="text-white font-medium hover:text-indigo-300 transition-colors line-clamp-1">
-                          {job.title || '(no title)'}
-                        </a>
-                        <span className="text-gray-400 text-xs">{job.employer || '—'}</span>
-                        {job.ai_ranking?.reason && (
-                          <span className="text-gray-500 text-xs mt-0.5 line-clamp-1 italic">{job.ai_ranking.reason}</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-gray-300 text-xs">{job.work_type || '—'}</span>
-                        <span className="text-gray-500 text-xs">{job.salary_text || '—'}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 text-gray-400 text-xs">{relativeDate(job.posted_at)}</td>
+                    <td className="px-3 py-3 text-gray-400 text-xs">{job.salary_text || '—'}</td>
+                    <td className="px-3 py-3 text-gray-400 text-xs">{job.work_type || '—'}</td>
+                    <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{relativeDate(job.posted_at)}</td>
                     <td className="px-3 py-3">
                       {job.ai_ranking?.recommended_action ? (
-                        <span className={`text-xs font-medium ${ACTION_STYLES[job.ai_ranking.recommended_action] || 'text-gray-400'}`}>
+                        <span className={`text-xs font-medium whitespace-nowrap ${
+                          job.ai_ranking.recommended_action === 'apply' ? 'text-green-400' :
+                          job.ai_ranking.recommended_action === 'review_carefully' ? 'text-yellow-400' : 'text-gray-500'
+                        }`}>
                           {job.ai_ranking.recommended_action === 'apply' ? '✓ Apply' :
                            job.ai_ranking.recommended_action === 'review_carefully' ? '👀 Review' : '↩ Skip'}
                         </span>
                       ) : null}
                     </td>
-                    <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                    <td className="px-3 py-3">
                       <button onClick={() => setExpanded(expanded === job.id ? null : job.id)}
-                        className="text-xs text-gray-500 hover:text-white">
+                        className="text-xs text-gray-500 hover:text-gray-300 whitespace-nowrap">
                         {expanded === job.id ? '▲ Less' : '▼ More'}
                       </button>
                     </td>
                   </tr>
                   {expanded === job.id && (
-                    <tr key={`${job.id}-detail`} className="bg-gray-900">
-                      <td colSpan={8} className="px-6 py-4">
-                        <div className="grid grid-cols-2 gap-6">
+                    <tr key={`${job.id}-detail`}>
+                      <td colSpan={11} className="px-6 py-4 bg-gray-950/60 border-t border-gray-800">
+                        <div className="grid grid-cols-3 gap-6">
+                          {/* Left: AI insights */}
                           <div className="space-y-3">
                             {job.ai_ranking?.key_skills && (
                               <div>
-                                <p className="text-xs font-medium text-gray-400 mb-1">KEY SKILLS</p>
+                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Key Skills Match</p>
                                 <p className="text-sm text-green-300">{job.ai_ranking.key_skills}</p>
-                              </div>
-                            )}
-                            {job.ai_ranking?.red_flags && (
-                              <div>
-                                <p className="text-xs font-medium text-gray-400 mb-1">RED FLAGS</p>
-                                <p className="text-sm text-red-300">{job.ai_ranking.red_flags}</p>
                               </div>
                             )}
                             {job.ai_ranking?.tailoring_notes && (
                               <div>
-                                <p className="text-xs font-medium text-gray-400 mb-1">TAILORING TIPS</p>
+                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Tailoring Tips</p>
                                 <p className="text-sm text-blue-300">{job.ai_ranking.tailoring_notes}</p>
                               </div>
                             )}
                           </div>
-                          <div className="space-y-2">
-                            <div className="grid grid-cols-2 gap-2 text-xs">
+                          {/* Middle: Red flags + reason */}
+                          <div className="space-y-3">
+                            {job.ai_ranking?.red_flags && (
+                              <div>
+                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Red Flags</p>
+                                <p className="text-sm text-red-300">{job.ai_ranking.red_flags}</p>
+                              </div>
+                            )}
+                            {job.ai_ranking?.reason && (
+                              <div>
+                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Ranking Reason</p>
+                                <p className="text-sm text-gray-300">{job.ai_ranking.reason}</p>
+                              </div>
+                            )}
+                          </div>
+                          {/* Right: Quick facts + link */}
+                          <div>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mb-4">
                               {[
-                                { label: 'Beginner Friendly', val: job.ai_ranking?.beginner_friendly },
-                                { label: 'GTO/Traineeship', val: job.ai_ranking?.gto_traineeship },
-                                { label: 'Training Offered', val: job.ai_ranking?.training_offered },
-                                { label: 'Qual. Risk', val: job.ai_ranking?.qualification_risk },
-                                { label: 'Resume Version', val: job.ai_ranking?.resume_version?.replace(/_/g, ' ') },
-                                { label: 'Cover Letter', val: job.ai_ranking?.cover_letter_needed },
-                              ].map(item => item.val ? (
-                                <div key={item.label}>
-                                  <span className="text-gray-500">{item.label}: </span>
-                                  <span className="text-gray-200 capitalize">{item.val}</span>
+                                ['Beginner Friendly', job.ai_ranking?.beginner_friendly],
+                                ['GTO/Traineeship', job.ai_ranking?.gto_traineeship],
+                                ['Training Offered', job.ai_ranking?.training_offered],
+                                ['Qual. Risk', job.ai_ranking?.qualification_risk],
+                                ['Resume Version', job.ai_ranking?.resume_version?.replace(/_/g, ' ')],
+                                ['Cover Letter', job.ai_ranking?.cover_letter_needed],
+                              ].filter(([, v]) => v).map(([label, val]) => (
+                                <div key={label as string}>
+                                  <span className="text-gray-500">{label}: </span>
+                                  <span className="text-gray-200 capitalize">{val}</span>
                                 </div>
-                              ) : null)}
+                              ))}
                             </div>
-                            <a href={job.url} target="_blank" rel="noopener noreferrer"
-                              className="inline-block mt-2 text-xs text-indigo-400 hover:text-indigo-300">
-                              View on {job.url?.includes('seek') ? 'Seek' : 'Indeed'} →
-                            </a>
+                            {job.url && (
+                              <a href={job.url} target="_blank" rel="noopener noreferrer"
+                                className="text-xs text-indigo-400 hover:text-indigo-300">
+                                View on {job.source === 'seek' ? 'Seek' : job.url?.includes('seek') ? 'Seek' : 'Indeed'} →
+                              </a>
+                            )}
                           </div>
                         </div>
                       </td>

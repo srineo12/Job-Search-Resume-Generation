@@ -2,27 +2,22 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 /** Build a seek.com.au search URL from keywords + filters */
-function buildSeekUrl(keywords: string[], include_in_title: string[], date_range: string): string {
-  const base = 'https://www.seek.com.au/jobs'
+function buildSeekUrl(keywords: string[], date_range: string): string {
+  // Use the classification-based URL for education/childcare jobs
+  // and pass keywords as the search query
   const params = new URLSearchParams()
   params.set('keywords', keywords.join(' '))
   params.set('where', 'Melbourne VIC')
   params.set('distance', '50')
   if (date_range) {
-    // '1d' → '1', '7d' → '7', '30d' → '30'
     const days = date_range.replace('d', '')
     params.set('daterange', days)
   }
-  // Seek supports filtering by job title via 'jobTitle' param (same as "in title only" checkbox)
-  if (include_in_title.length > 0) {
-    params.set('jobTitle', include_in_title.join(' '))
-  }
-  return `${base}?${params.toString()}`
+  return `https://www.seek.com.au/jobs?${params.toString()}`
 }
 
 /** Build an indeed.com.au search URL */
 function buildIndeedUrl(keywords: string[], date_range: string): string {
-  const base = 'https://au.indeed.com/jobs'
   const params = new URLSearchParams()
   params.set('q', keywords.join(' '))
   params.set('l', 'Melbourne VIC')
@@ -32,7 +27,7 @@ function buildIndeedUrl(keywords: string[], date_range: string): string {
     const fromage = daysMap[date_range]
     if (fromage) params.set('fromage', fromage)
   }
-  return `${base}?${params.toString()}`
+  return `https://au.indeed.com/jobs?${params.toString()}`
 }
 
 export async function GET() {
@@ -50,13 +45,24 @@ export async function GET() {
   return NextResponse.json({ imports: data })
 }
 
+export async function DELETE(request: NextRequest) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { id } = await request.json()
+  const { error } = await supabase.from('imports').delete().eq('id', id).eq('user_id', user.id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ success: true })
+}
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
-  const { source, keyword_set_ids, include_in_title = [], date_range = '', max_items = 100 } = body
+  const { source, keyword_set_ids, include_in_title = [], date_range = '', max_items = 10 } = body
 
   if (!source || !['seek', 'indeed'].includes(source))
     return NextResponse.json({ error: 'Invalid source' }, { status: 400 })
@@ -76,19 +82,22 @@ export async function POST(request: NextRequest) {
   if (!allKeywords.length)
     return NextResponse.json({ error: 'No keywords found in selected sets' }, { status: 400 })
 
+  const maxItemsCapped = Math.min(Math.max(1, max_items), 500)
+
   // Build the search URL for the actor
   const searchUrl = source === 'seek'
-    ? buildSeekUrl(allKeywords, include_in_title, date_range)
+    ? buildSeekUrl(allKeywords, date_range)
     : buildIndeedUrl(allKeywords, date_range)
 
-  // Build Apify input — websift actor expects { url, maxItems }
+  // Build Apify input
+  // websift/seek-job-scraper uses 'maximumResults' (not 'maxItems') to cap results
   const apifyInput = {
-    ...(actor.default_input || {}),
     url: searchUrl,
-    maxItems: Math.min(max_items, 500),
+    maximumResults: maxItemsCapped,   // correct field name for this actor
+    maxItems: maxItemsCapped,         // fallback in case actor checks either
   }
 
-  // Apify URLs use '~' instead of '/' in actor IDs (e.g. websift~seek-job-scraper)
+  // Apify URLs use '~' instead of '/' in actor IDs
   const actorIdForUrl = actor.actor_id.replace('/', '~')
   let apifyRunId: string
   try {
@@ -114,7 +123,7 @@ export async function POST(request: NextRequest) {
     .from('imports')
     .insert({
       user_id: user.id, source, actor_id: actor.actor_id,
-      keyword_set_ids, input_payload: apifyInput,
+      keyword_set_ids, input_payload: { ...apifyInput, include_in_title },
       apify_run_id: apifyRunId, status: 'queued',
     })
     .select().single()

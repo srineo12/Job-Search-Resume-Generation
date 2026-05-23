@@ -39,7 +39,7 @@ export default function ImportsPage() {
     keyword_set_ids: [] as string[],
     title_set_ids: [] as string[],
     date_range: '30d',
-    max_items: 100,
+    max_items: 10,
   })
 
   useEffect(() => {
@@ -96,6 +96,16 @@ export default function ImportsPage() {
     } finally {
       setTriggering(false)
     }
+  }
+
+  async function handleDelete(importId: string) {
+    if (!confirm('Delete this import record? Jobs already imported will remain.')) return
+    await fetch('/api/imports', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: importId }),
+    })
+    loadImports()
   }
 
   async function handleRefresh(importId: string) {
@@ -263,6 +273,7 @@ export default function ImportsPage() {
                       {imp.status === 'failed' && (
                         <button onClick={() => handleRefresh(imp.id)} className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg">Retry</button>
                       )}
+                      <button onClick={() => handleDelete(imp.id)} className="px-3 py-1.5 text-xs bg-red-950 hover:bg-red-900 text-red-400 rounded-lg">Delete</button>
                     </div>
                   </div>
                 )

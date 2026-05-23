@@ -9,6 +9,7 @@ export interface NormalizedJob {
   location: string
   remote_flag: boolean
   salary_text?: string | null
+  work_type?: string | null
   description_text: string
   description_html?: string | null
   posted_at?: Date | null

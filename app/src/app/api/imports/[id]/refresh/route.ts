@@ -142,15 +142,28 @@ export async function GET(
   }
 
   // Process jobs with deduplication
+  // Title post-filter: if include_in_title terms were saved, only keep jobs
+  // whose title contains at least one term (case-insensitive)
+  const titleFilterTerms: string[] = (importRecord.input_payload?.include_in_title || [])
+    .map((t: string) => t.toLowerCase().trim())
+    .filter(Boolean)
+
+  const titleFilteredJobs = titleFilterTerms.length > 0
+    ? normalizedJobs.filter(job =>
+        titleFilterTerms.some(term => job.title.toLowerCase().includes(term))
+      )
+    : normalizedJobs
+
   let stats = {
     fetched: rawJobs.length,
+    title_filtered: rawJobs.length - titleFilteredJobs.length,
     inserted: 0,
     duplicates_by_url: 0,
     duplicates_by_employer_title: 0,
     errors: 0,
   }
 
-  for (const normalizedJob of normalizedJobs) {
+  for (const normalizedJob of titleFilteredJobs) {
     try {
       // Check for duplicate by URL hash
       const { data: byUrl } = await supabase
@@ -193,6 +206,7 @@ export async function GET(
           location: normalizedJob.location,
           remote_flag: normalizedJob.remote_flag,
           salary_text: normalizedJob.salary_text,
+          work_type: normalizedJob.work_type,
           description_text: normalizedJob.description_text,
           description_html: normalizedJob.description_html,
           posted_at: normalizedJob.posted_at,

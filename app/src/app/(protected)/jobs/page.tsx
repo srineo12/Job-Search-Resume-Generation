@@ -8,6 +8,7 @@ interface Job {
   employer: string
   location: string
   work_type: string
+  remote_flag: boolean
   salary_text: string
   posted_at: string
   url: string
@@ -215,23 +216,24 @@ export default function JobsPage() {
           No jobs found. <a href="/imports" className="text-indigo-400">Import jobs →</a>
         </div>
       ) : (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wider">
-                <th className="px-3 py-3 w-8">
+                <th className="px-3 py-3 w-8 sticky left-0 bg-gray-900">
                   <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0}
                     onChange={toggleAll} className="accent-indigo-500" />
                 </th>
                 {/* CRITICAL: Title & Employer first */}
-                <th className="px-3 py-3 text-left">Job Title</th>
-                <th className="px-3 py-3 text-left w-36">Employer</th>
-                <th className="px-3 py-3 text-left w-32">Location</th>
+                <th className="px-3 py-3 text-left min-w-[220px] sticky left-8 bg-gray-900">Job Title</th>
+                <th className="px-3 py-3 text-left min-w-[140px]">Employer</th>
+                <th className="px-3 py-3 text-left min-w-[130px]">Location</th>
                 <th className="px-3 py-3 text-center w-14">Score</th>
-                <th className="px-3 py-3 text-left w-24">Priority</th>
-                <th className="px-3 py-3 text-left w-24">Salary</th>
-                <th className="px-3 py-3 text-left w-20">Type</th>
+                <th className="px-3 py-3 text-left min-w-[90px]">Priority</th>
+                <th className="px-3 py-3 text-left min-w-[130px]">Salary</th>
+                <th className="px-3 py-3 text-left min-w-[110px]">Type</th>
                 <th className="px-3 py-3 text-left w-16">Posted</th>
+                <th className="px-3 py-3 text-left w-16">Source</th>
                 <th className="px-3 py-3 text-left w-20">Action</th>
                 <th className="px-3 py-3 w-14"></th>
               </tr>
@@ -241,12 +243,12 @@ export default function JobsPage() {
                 <>
                   <tr key={job.id}
                     className={`hover:bg-gray-800/40 transition-colors ${selected.has(job.id) ? 'bg-indigo-950/20' : ''}`}>
-                    <td className="px-3 py-3 text-center">
+                    <td className="px-3 py-3 text-center sticky left-0 bg-inherit">
                       <input type="checkbox" checked={selected.has(job.id)}
                         onChange={() => toggleSelect(job.id)} className="accent-indigo-500" />
                     </td>
                     {/* Title — clickable, links to job */}
-                    <td className="px-3 py-3 max-w-xs">
+                    <td className="px-3 py-3 min-w-[220px] sticky left-8 bg-inherit">
                       <a href={job.url} target="_blank" rel="noopener noreferrer"
                         className="text-white font-medium hover:text-indigo-300 transition-colors line-clamp-2 leading-snug">
                         {job.title || '(no title)'}
@@ -255,8 +257,13 @@ export default function JobsPage() {
                         <p className="text-gray-500 text-xs mt-0.5 line-clamp-1 italic">{job.ai_ranking.reason}</p>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-gray-300 text-xs max-w-[144px] truncate">{job.employer || '—'}</td>
-                    <td className="px-3 py-3 text-gray-400 text-xs max-w-[128px] truncate">{job.location || '—'}</td>
+                    <td className="px-3 py-3 text-gray-300 text-xs min-w-[140px]">
+                      <span className="block truncate max-w-[136px]" title={job.employer}>{job.employer || '—'}</span>
+                    </td>
+                    <td className="px-3 py-3 text-gray-400 text-xs min-w-[130px]">
+                      <span className="block truncate max-w-[126px]" title={job.location}>{job.location || '—'}</span>
+                      {job.remote_flag && <span className="text-teal-400 text-xs">🏠 Remote</span>}
+                    </td>
                     <td className="px-3 py-3 text-center"><ScoreBadge score={job.ai_score} /></td>
                     <td className="px-3 py-3">
                       {job.ai_priority ? (
@@ -265,9 +272,12 @@ export default function JobsPage() {
                         </span>
                       ) : <span className="text-gray-600 text-xs">Unranked</span>}
                     </td>
-                    <td className="px-3 py-3 text-gray-400 text-xs">{job.salary_text || '—'}</td>
-                    <td className="px-3 py-3 text-gray-400 text-xs">{job.work_type || '—'}</td>
+                    <td className="px-3 py-3 text-gray-400 text-xs min-w-[130px]">
+                      <span title={job.salary_text}>{job.salary_text ? (job.salary_text.length > 20 ? job.salary_text.slice(0, 20) + '…' : job.salary_text) : 'N/A'}</span>
+                    </td>
+                    <td className="px-3 py-3 text-gray-400 text-xs whitespace-nowrap">{job.work_type || '—'}</td>
                     <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{relativeDate(job.posted_at)}</td>
+                    <td className="px-3 py-3 text-gray-600 text-xs capitalize">{job.source}</td>
                     <td className="px-3 py-3">
                       {job.ai_ranking?.recommended_action ? (
                         <span className={`text-xs font-medium whitespace-nowrap ${
@@ -288,7 +298,7 @@ export default function JobsPage() {
                   </tr>
                   {expanded === job.id && (
                     <tr key={`${job.id}-detail`}>
-                      <td colSpan={11} className="px-6 py-4 bg-gray-950/60 border-t border-gray-800">
+                      <td colSpan={12} className="px-6 py-4 bg-gray-950/60 border-t border-gray-800">
                         <div className="grid grid-cols-3 gap-6">
                           {/* Left: AI insights */}
                           <div className="space-y-3">

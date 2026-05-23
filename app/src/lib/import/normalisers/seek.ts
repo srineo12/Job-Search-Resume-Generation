@@ -38,10 +38,13 @@ export function normalizeSeekJob(raw: any): NormalizedJob {
   const title = raw.title || ''
 
   // Location — nested under joblocationInfo
+  // Prefer displayLocation (e.g. "Melbourne VIC 3000") to avoid duplicating suburb+location.
   const locInfo = raw.joblocationInfo || {}
-  const location = locInfo.displayLocation || locInfo.location
-    ? `${locInfo.suburb || ''} ${locInfo.location || ''}`.trim()
-    : (raw.location || '')
+  const location = locInfo.displayLocation
+    ? locInfo.displayLocation
+    : locInfo.suburb && locInfo.location && locInfo.suburb !== locInfo.location
+      ? `${locInfo.suburb}, ${locInfo.location}`
+      : (locInfo.location || locInfo.suburb || raw.location || '')
 
   // Remote flag
   const remoteFlag = typeof raw.workArrangements === 'string'

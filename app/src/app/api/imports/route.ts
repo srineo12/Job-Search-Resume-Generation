@@ -3,28 +3,25 @@ import { createClient } from '@/lib/supabase/server'
 
 /** Build a seek.com.au search URL from keywords + filters.
  *
- * Multi-word keywords (e.g. "teacher aide") are quoted so Seek treats them as phrases.
- * Multiple keywords are joined with OR so Seek returns any matching role.
- * Example: keywords=["teacher aide","teaching assistant"] →
- *   ?keywords="teacher aide" OR "teaching assistant"
+ * Uses the path-based location format (/in-All-Melbourne-VIC) which is more
+ * reliable than the ?where= query param.  Keywords are space-joined (no OR/quotes)
+ * so Seek's own relevance engine handles matching — the native actor
+ * `includeOneInTitle` filter then narrows results to relevant job titles.
  */
 function buildSeekUrl(keywords: string[], date_range: string): string {
-  // Quote multi-word phrases, then join with OR for any-match behaviour
   const keywordQuery = keywords
     .map(k => k.trim())
     .filter(Boolean)
-    .map(k => (k.includes(' ') ? `"${k}"` : k))
-    .join(' OR ')
+    .join(' ')   // plain space-join; Seek handles relevance internally
 
   const params = new URLSearchParams()
   params.set('keywords', keywordQuery)
-  params.set('where', 'Melbourne VIC')
-  params.set('distance', '50')
   if (date_range) {
     const days = date_range.replace('d', '')
     params.set('daterange', days)
   }
-  return `https://www.seek.com.au/jobs?${params.toString()}`
+  // Path-based location (more reliable than ?where= query param)
+  return `https://www.seek.com.au/jobs/in-All-Melbourne-VIC?${params.toString()}`
 }
 
 /** Build an indeed.com.au search URL */
@@ -103,9 +100,14 @@ export async function POST(request: NextRequest) {
   // Build Apify input.
   // websift/seek-job-scraper's actual controlling field is 'maxResults' (confirmed from
   // exported run JSON — actor ignores 'maxItems' and 'maximumResults').
-  const apifyInput = {
+  // includeOneInTitle is a native actor field — it tells the actor to only keep results
+  // where at least one of the comma-separated terms appears in the job title.
+  const apifyInput: Record<string, unknown> = {
     url: searchUrl,
     maxResults: maxItemsCapped,   // ← actual field the actor respects
+    ...(include_in_title.length > 0
+      ? { includeOneInTitle: include_in_title.join(', ') }
+      : {}),
   }
 
   // Apify URLs use '~' instead of '/' in actor IDs

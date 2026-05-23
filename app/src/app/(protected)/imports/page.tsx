@@ -15,7 +15,8 @@ interface Import {
   source: 'seek' | 'indeed'
   status: 'queued' | 'running' | 'succeeded' | 'failed'
   stats?: { fetched?: number; inserted?: number; duplicates_by_url?: number; duplicates_by_employer_title?: number; title_filtered?: number }
-  input_payload?: { url?: string; maxResults?: number; include_in_title?: string[] }
+  input_payload?: Record<string, unknown>
+  apify_run_id?: string
   error_message?: string
   created_at: string
 }
@@ -35,6 +36,7 @@ export default function ImportsPage() {
   const [refreshing, setRefreshing] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [expandedImport, setExpandedImport] = useState<string | null>(null)
   const [form, setForm] = useState({
     source: 'seek' as 'seek' | 'indeed',
     keyword_set_ids: [] as string[],
@@ -238,51 +240,89 @@ export default function ImportsPage() {
           : <div className="space-y-2">
               {imports.map(imp => {
                 const dupes = (imp.stats?.duplicates_by_url || 0) + (imp.stats?.duplicates_by_employer_title || 0)
+                const isExpanded = expandedImport === imp.id
+                const payload = imp.input_payload || {}
                 return (
-                  <div key={imp.id} className="group bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <span className="text-white font-medium capitalize">{imp.source}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
-                        imp.status === 'succeeded' ? 'bg-green-900 text-green-400' :
-                        imp.status === 'failed' ? 'bg-red-900 text-red-400' :
-                        imp.status === 'running' ? 'bg-yellow-900 text-yellow-400' : 'bg-gray-800 text-gray-400'
-                      }`}>
-                        {imp.status === 'queued' && '⏳ Queued'}
-                        {imp.status === 'running' && '⚙️ Running'}
-                        {imp.status === 'succeeded' && '✓ Done'}
-                        {imp.status === 'failed' && '✗ Failed'}
-                      </span>
-                      <span className="text-gray-500 text-xs truncate max-w-xs">
-                        {imp.status === 'succeeded' && imp.stats
-                          ? `${imp.stats.inserted} new · ${dupes} dupes · ${imp.stats.title_filtered ?? 0} title-filtered`
-                          : ''}
-                        {imp.status === 'failed' && imp.error_message ? imp.error_message : ''}
-                        {(imp.status === 'queued' || imp.status === 'running') ? new Date(imp.created_at).toLocaleString() : ''}
-                      </span>
-                      {imp.input_payload?.url && (
-                        <span className="text-gray-700 text-xs truncate max-w-sm hidden group-hover:block" title={imp.input_payload.url}>
-                          🔗 {imp.input_payload.url.slice(0, 60)}…
+                  <div key={imp.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                    {/* Main row */}
+                    <div className="p-4 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <span className="text-white font-medium capitalize">{imp.source}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
+                          imp.status === 'succeeded' ? 'bg-green-900 text-green-400' :
+                          imp.status === 'failed' ? 'bg-red-900 text-red-400' :
+                          imp.status === 'running' ? 'bg-yellow-900 text-yellow-400' : 'bg-gray-800 text-gray-400'
+                        }`}>
+                          {imp.status === 'queued' && '⏳ Queued'}
+                          {imp.status === 'running' && '⚙️ Running'}
+                          {imp.status === 'succeeded' && '✓ Done'}
+                          {imp.status === 'failed' && '✗ Failed'}
                         </span>
-                      )}
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      {(imp.status === 'queued' || imp.status === 'running') && (
-                        <button onClick={() => handleRefresh(imp.id)} disabled={refreshing === imp.id}
-                          className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white rounded-lg">
-                          {refreshing === imp.id ? 'Checking...' : 'Check Status'}
+                        <span className="text-gray-500 text-xs truncate">
+                          {imp.status === 'succeeded' && imp.stats
+                            ? `${imp.stats.inserted} new · ${dupes} dupes · ${imp.stats.fetched ?? 0} fetched`
+                            : ''}
+                          {imp.status === 'failed' && imp.error_message ? imp.error_message : ''}
+                          {(imp.status === 'queued' || imp.status === 'running') ? new Date(imp.created_at).toLocaleString() : ''}
+                        </span>
+                        <button onClick={() => setExpandedImport(isExpanded ? null : imp.id)}
+                          className="text-xs text-gray-600 hover:text-gray-400 shrink-0">
+                          {isExpanded ? '▲ hide params' : '▼ show params'}
                         </button>
-                      )}
-                      {imp.status === 'succeeded' && (
-                        <>
-                          <button onClick={() => handleRefresh(imp.id)} className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg">Re-check</button>
-                          <Link href="/jobs" className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg">View Jobs →</Link>
-                        </>
-                      )}
-                      {imp.status === 'failed' && (
-                        <button onClick={() => handleRefresh(imp.id)} className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg">Retry</button>
-                      )}
-                      <button onClick={() => handleDelete(imp.id)} className="px-3 py-1.5 text-xs bg-red-950 hover:bg-red-900 text-red-400 rounded-lg">Delete</button>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        {(imp.status === 'queued' || imp.status === 'running') && (
+                          <button onClick={() => handleRefresh(imp.id)} disabled={refreshing === imp.id}
+                            className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white rounded-lg">
+                            {refreshing === imp.id ? 'Checking...' : 'Check Status'}
+                          </button>
+                        )}
+                        {imp.status === 'succeeded' && (
+                          <>
+                            <button onClick={() => handleRefresh(imp.id)} className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg">Re-check</button>
+                            <Link href="/jobs" className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg">View Jobs →</Link>
+                          </>
+                        )}
+                        {imp.status === 'failed' && (
+                          <button onClick={() => handleRefresh(imp.id)} className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg">Retry</button>
+                        )}
+                        <button onClick={() => handleDelete(imp.id)} className="px-3 py-1.5 text-xs bg-red-950 hover:bg-red-900 text-red-400 rounded-lg">Delete</button>
+                      </div>
                     </div>
+
+                    {/* Expanded: API call parameters */}
+                    {isExpanded && (
+                      <div className="border-t border-gray-800 bg-gray-950 px-4 py-3 space-y-2">
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Apify API call parameters</p>
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
+                          <div><span className="text-gray-500">Source:</span> <span className="text-gray-300 capitalize">{imp.source}</span></div>
+                          <div><span className="text-gray-500">Max Results:</span> <span className="text-gray-300">{String(payload.maxResults ?? '—')}</span></div>
+                          {payload.includeOneInTitle ? (
+                            <div className="col-span-2">
+                              <span className="text-gray-500">Include One In Title:</span>{' '}
+                              <span className="text-yellow-300">{String(payload.includeOneInTitle)}</span>
+                            </div>
+                          ) : Array.isArray(payload.include_in_title) && payload.include_in_title.length > 0 ? (
+                            <div className="col-span-2">
+                              <span className="text-gray-500">Title filter terms:</span>{' '}
+                              <span className="text-yellow-300">{(payload.include_in_title as string[]).join(', ')}</span>
+                            </div>
+                          ) : null}
+                        </div>
+                        {payload.url ? (
+                          <div>
+                            <p className="text-gray-500 text-xs mb-1">Search URL sent to Apify:</p>
+                            <a href={String(payload.url)} target="_blank" rel="noopener noreferrer"
+                              className="text-indigo-400 text-xs break-all hover:text-indigo-300">
+                              {String(payload.url)}
+                            </a>
+                          </div>
+                        ) : null}
+                        <div className="pt-1">
+                          <p className="text-gray-600 text-xs">Apify run ID: {imp.apify_run_id || '—'} · Started: {new Date(imp.created_at).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}

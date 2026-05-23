@@ -8,7 +8,6 @@ interface Job {
   employer: string
   location: string
   work_type: string
-  remote_flag: boolean
   salary_text: string
   posted_at: string
   url: string
@@ -20,7 +19,10 @@ interface Job {
     beginner_friendly?: string
     gto_traineeship?: string
     training_offered?: string
+    cert3_pathway?: string
+    prior_school_required?: string
     qualification_risk?: string
+    experience_risk?: string
     recommended_action?: string
     resume_version?: string
     cover_letter_needed?: string
@@ -30,6 +32,25 @@ interface Job {
     tailoring_notes?: string
   } | null
   ai_ranked_at: string | null
+  // raw_payload for all Apify fields
+  raw_payload: {
+    numApplicants?: number
+    resumePercentage?: number
+    coverLetterPercentage?: number
+    salary?: string
+    workTypes?: string
+    workArrangements?: string
+    jobLink?: string
+    applyLink?: string
+    joblocationInfo?: {
+      area?: string
+      displayLocation?: string
+      location?: string
+      suburb?: string
+      country?: string
+    }
+    [key: string]: unknown
+  } | null
 }
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -56,6 +77,14 @@ function ScoreBadge({ score }: { score: number | null }) {
   if (score == null) return <span className="text-gray-700 text-sm">—</span>
   const color = score >= 70 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-red-400'
   return <span className={`text-base font-bold ${color}`}>{score}</span>
+}
+
+function Cell({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <td className={`px-3 py-2.5 whitespace-nowrap text-xs ${className}`}>
+      {children}
+    </td>
+  )
 }
 
 export default function JobsPage() {
@@ -108,7 +137,7 @@ export default function JobsPage() {
     setRanking(true)
     let total = 0
     while (true) {
-      setRankProgress(`Ranking... ${total} done so far`)
+      setRankProgress(`Ranking... ${total} done`)
       const res = await fetch('/api/jobs/rank-batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -119,7 +148,7 @@ export default function JobsPage() {
       if (!d.ranked || d.remaining === 0) break
       setRankProgress(`Ranked ${total}... ${d.remaining} remaining`)
     }
-    setRankProgress(`Done! Ranked ${total} jobs.`)
+    setRankProgress(`Done — ${total} jobs ranked`)
     loadJobs()
     setTimeout(() => { setRanking(false); setRankProgress('') }, 3000)
   }
@@ -134,10 +163,20 @@ export default function JobsPage() {
       body: JSON.stringify({ job_ids: Array.from(selected), limit: selected.size }),
     })
     const d = await res.json()
-    setRankProgress(`Done! Ranked ${d.ranked} jobs.`)
+    setRankProgress(`Done — ${d.ranked} ranked`)
     setSelected(new Set())
     loadJobs()
     setTimeout(() => { setRanking(false); setRankProgress('') }, 2000)
+  }
+
+  async function handleDeleteJob(jobId: string) {
+    if (!confirm('Remove this job?')) return
+    await fetch('/api/jobs', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: jobId }),
+    })
+    loadJobs()
   }
 
   function toggleSelect(id: string) {
@@ -163,11 +202,11 @@ export default function JobsPage() {
             <>
               <button onClick={handleRankSelected} disabled={ranking}
                 className="px-4 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg">
-                Rank {selected.size} selected
+                ⚡ Rank {selected.size} selected
               </button>
-              <button onClick={() => alert(`Generate docs for ${selected.size} jobs — coming in Phase 6`)}
+              <button onClick={() => alert(`Generate docs — coming in Phase 6`)}
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg">
-                📄 Generate Resume+Cover ({selected.size})
+                📄 Generate ({selected.size})
               </button>
             </>
           )}
@@ -183,7 +222,7 @@ export default function JobsPage() {
       )}
 
       {/* Filter tabs + sort */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-2">
         <div className="flex gap-1 flex-wrap">
           {[
             { key: 'all', label: `All (${counts.total})` },
@@ -202,7 +241,7 @@ export default function JobsPage() {
           ))}
         </div>
         <select value={sortBy} onChange={e => setSortBy(e.target.value as 'score' | 'posted')}
-          className="px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-gray-300 text-xs focus:outline-none">
+          className="px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-gray-300 text-xs focus:outline-none shrink-0">
           <option value="score">Sort by Score</option>
           <option value="posted">Sort by Date Posted</option>
         </select>
@@ -217,149 +256,224 @@ export default function JobsPage() {
         </div>
       ) : (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="text-sm" style={{ minWidth: '1100px' }}>
             <thead>
-              <tr className="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wider">
-                <th className="px-3 py-3 w-8 sticky left-0 bg-gray-900">
+              <tr className="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wider whitespace-nowrap">
+                <th className="px-3 py-3 w-8 sticky left-0 bg-gray-900 z-10">
                   <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0}
                     onChange={toggleAll} className="accent-indigo-500" />
                 </th>
-                {/* CRITICAL: Title & Employer first */}
-                <th className="px-3 py-3 text-left min-w-[220px] sticky left-8 bg-gray-900">Job Title</th>
-                <th className="px-3 py-3 text-left min-w-[140px]">Employer</th>
-                <th className="px-3 py-3 text-left min-w-[130px]">Location</th>
+                <th className="px-3 py-3 text-left w-56 sticky left-8 bg-gray-900 z-10">Job Title</th>
+                <th className="px-3 py-3 text-left w-36">Employer</th>
+                <th className="px-3 py-3 text-left w-44">Location</th>
                 <th className="px-3 py-3 text-center w-14">Score</th>
-                <th className="px-3 py-3 text-left min-w-[90px]">Priority</th>
-                <th className="px-3 py-3 text-left min-w-[130px]">Salary</th>
-                <th className="px-3 py-3 text-left min-w-[110px]">Type</th>
+                <th className="px-3 py-3 text-left w-24">Priority</th>
+                <th className="px-3 py-3 text-left w-36">Salary</th>
+                <th className="px-3 py-3 text-left w-24">Type</th>
+                <th className="px-3 py-3 text-left w-20">Arrangement</th>
+                <th className="px-3 py-3 text-right w-16">Applicants</th>
                 <th className="px-3 py-3 text-left w-16">Posted</th>
-                <th className="px-3 py-3 text-left w-16">Source</th>
-                <th className="px-3 py-3 text-left w-20">Action</th>
-                <th className="px-3 py-3 w-14"></th>
+                <th className="px-3 py-3 text-left w-14">Action</th>
+                <th className="px-3 py-3 w-8"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/60">
-              {filtered.map(job => (
-                <>
-                  <tr key={job.id}
-                    className={`hover:bg-gray-800/40 transition-colors ${selected.has(job.id) ? 'bg-indigo-950/20' : ''}`}>
-                    <td className="px-3 py-3 text-center sticky left-0 bg-inherit">
-                      <input type="checkbox" checked={selected.has(job.id)}
-                        onChange={() => toggleSelect(job.id)} className="accent-indigo-500" />
-                    </td>
-                    {/* Title — clickable, links to job */}
-                    <td className="px-3 py-3 min-w-[220px] sticky left-8 bg-inherit">
-                      <a href={job.url} target="_blank" rel="noopener noreferrer"
-                        className="text-white font-medium hover:text-indigo-300 transition-colors line-clamp-2 leading-snug">
-                        {job.title || '(no title)'}
-                      </a>
-                      {job.ai_ranking?.reason && (
-                        <p className="text-gray-500 text-xs mt-0.5 line-clamp-1 italic">{job.ai_ranking.reason}</p>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-gray-300 text-xs min-w-[140px]">
-                      <span className="block truncate max-w-[136px]" title={job.employer}>{job.employer || '—'}</span>
-                    </td>
-                    <td className="px-3 py-3 text-gray-400 text-xs min-w-[130px]">
-                      <span className="block truncate max-w-[126px]" title={job.location}>{job.location || '—'}</span>
-                      {job.remote_flag && <span className="text-teal-400 text-xs">🏠 Remote</span>}
-                    </td>
-                    <td className="px-3 py-3 text-center"><ScoreBadge score={job.ai_score} /></td>
-                    <td className="px-3 py-3">
-                      {job.ai_priority ? (
-                        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${PRIORITY_STYLES[job.ai_priority]}`}>
-                          {PRIORITY_LABELS[job.ai_priority]}
+              {filtered.map(job => {
+                const rp = job.raw_payload || {}
+                const arrangement = rp.workArrangements || '—'
+                const applicants = rp.numApplicants ?? null
+                return (
+                  <>
+                    <tr key={job.id}
+                      className={`hover:bg-gray-800/40 transition-colors ${selected.has(job.id) ? 'bg-indigo-950/20' : ''}`}>
+                      <td className="px-3 py-2.5 text-center sticky left-0 bg-inherit z-10">
+                        <input type="checkbox" checked={selected.has(job.id)}
+                          onChange={() => toggleSelect(job.id)} className="accent-indigo-500" />
+                      </td>
+
+                      {/* Title — sticky, no wrap, truncate */}
+                      <td className="px-3 py-2.5 w-56 sticky left-8 bg-inherit z-10">
+                        <a href={job.url} target="_blank" rel="noopener noreferrer"
+                          className="text-white font-medium hover:text-indigo-300 transition-colors block truncate max-w-[210px]"
+                          title={job.title}>
+                          {job.title || '(no title)'}
+                        </a>
+                        {job.ai_ranking?.reason && (
+                          <p className="text-gray-500 text-xs mt-0.5 truncate max-w-[210px] italic" title={job.ai_ranking.reason}>
+                            {job.ai_ranking.reason}
+                          </p>
+                        )}
+                      </td>
+
+                      <Cell className="text-gray-300">
+                        <span className="block truncate max-w-[132px]" title={job.employer}>{job.employer || '—'}</span>
+                      </Cell>
+
+                      <Cell className="text-gray-400">
+                        <span className="block truncate max-w-[168px]" title={job.location}>{job.location || '—'}</span>
+                      </Cell>
+
+                      <Cell className="text-center"><ScoreBadge score={job.ai_score} /></Cell>
+
+                      <Cell>
+                        {job.ai_priority ? (
+                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${PRIORITY_STYLES[job.ai_priority]}`}>
+                            {PRIORITY_LABELS[job.ai_priority]}
+                          </span>
+                        ) : <span className="text-gray-600">Unranked</span>}
+                      </Cell>
+
+                      <Cell className="text-gray-400">
+                        <span className="block truncate max-w-[132px]" title={job.salary_text || undefined}>
+                          {job.salary_text || 'N/A'}
                         </span>
-                      ) : <span className="text-gray-600 text-xs">Unranked</span>}
-                    </td>
-                    <td className="px-3 py-3 text-gray-400 text-xs min-w-[130px]">
-                      <span title={job.salary_text}>{job.salary_text ? (job.salary_text.length > 20 ? job.salary_text.slice(0, 20) + '…' : job.salary_text) : 'N/A'}</span>
-                    </td>
-                    <td className="px-3 py-3 text-gray-400 text-xs whitespace-nowrap">{job.work_type || '—'}</td>
-                    <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{relativeDate(job.posted_at)}</td>
-                    <td className="px-3 py-3 text-gray-600 text-xs capitalize">{job.source}</td>
-                    <td className="px-3 py-3">
-                      {job.ai_ranking?.recommended_action ? (
-                        <span className={`text-xs font-medium whitespace-nowrap ${
-                          job.ai_ranking.recommended_action === 'apply' ? 'text-green-400' :
-                          job.ai_ranking.recommended_action === 'review_carefully' ? 'text-yellow-400' : 'text-gray-500'
-                        }`}>
-                          {job.ai_ranking.recommended_action === 'apply' ? '✓ Apply' :
-                           job.ai_ranking.recommended_action === 'review_carefully' ? '👀 Review' : '↩ Skip'}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-3">
-                      <button onClick={() => setExpanded(expanded === job.id ? null : job.id)}
-                        className="text-xs text-gray-500 hover:text-gray-300 whitespace-nowrap">
-                        {expanded === job.id ? '▲ Less' : '▼ More'}
-                      </button>
-                    </td>
-                  </tr>
-                  {expanded === job.id && (
-                    <tr key={`${job.id}-detail`}>
-                      <td colSpan={12} className="px-6 py-4 bg-gray-950/60 border-t border-gray-800">
-                        <div className="grid grid-cols-3 gap-6">
-                          {/* Left: AI insights */}
-                          <div className="space-y-3">
-                            {job.ai_ranking?.key_skills && (
-                              <div>
-                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Key Skills Match</p>
-                                <p className="text-sm text-green-300">{job.ai_ranking.key_skills}</p>
-                              </div>
-                            )}
-                            {job.ai_ranking?.tailoring_notes && (
-                              <div>
-                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Tailoring Tips</p>
-                                <p className="text-sm text-blue-300">{job.ai_ranking.tailoring_notes}</p>
-                              </div>
-                            )}
-                          </div>
-                          {/* Middle: Red flags + reason */}
-                          <div className="space-y-3">
-                            {job.ai_ranking?.red_flags && (
-                              <div>
-                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Red Flags</p>
-                                <p className="text-sm text-red-300">{job.ai_ranking.red_flags}</p>
-                              </div>
-                            )}
-                            {job.ai_ranking?.reason && (
-                              <div>
-                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Ranking Reason</p>
-                                <p className="text-sm text-gray-300">{job.ai_ranking.reason}</p>
-                              </div>
-                            )}
-                          </div>
-                          {/* Right: Quick facts + link */}
-                          <div>
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mb-4">
-                              {[
-                                ['Beginner Friendly', job.ai_ranking?.beginner_friendly],
-                                ['GTO/Traineeship', job.ai_ranking?.gto_traineeship],
-                                ['Training Offered', job.ai_ranking?.training_offered],
-                                ['Qual. Risk', job.ai_ranking?.qualification_risk],
-                                ['Resume Version', job.ai_ranking?.resume_version?.replace(/_/g, ' ')],
-                                ['Cover Letter', job.ai_ranking?.cover_letter_needed],
-                              ].filter(([, v]) => v).map(([label, val]) => (
-                                <div key={label as string}>
-                                  <span className="text-gray-500">{label}: </span>
-                                  <span className="text-gray-200 capitalize">{val}</span>
-                                </div>
-                              ))}
-                            </div>
-                            {job.url && (
-                              <a href={job.url} target="_blank" rel="noopener noreferrer"
-                                className="text-xs text-indigo-400 hover:text-indigo-300">
-                                View on {job.source === 'seek' ? 'Seek' : job.url?.includes('seek') ? 'Seek' : 'Indeed'} →
-                              </a>
-                            )}
-                          </div>
-                        </div>
+                      </Cell>
+
+                      <Cell className="text-gray-400">{job.work_type || '—'}</Cell>
+                      <Cell className="text-gray-400">{arrangement}</Cell>
+                      <Cell className="text-gray-400 text-right">
+                        {applicants != null ? applicants.toLocaleString() : '—'}
+                      </Cell>
+                      <Cell className="text-gray-500">{relativeDate(job.posted_at)}</Cell>
+
+                      <Cell>
+                        {job.ai_ranking?.recommended_action ? (
+                          <span className={`font-medium ${
+                            job.ai_ranking.recommended_action === 'apply' ? 'text-green-400' :
+                            job.ai_ranking.recommended_action === 'review_carefully' ? 'text-yellow-400' : 'text-gray-500'
+                          }`}>
+                            {job.ai_ranking.recommended_action === 'apply' ? '✓ Apply' :
+                             job.ai_ranking.recommended_action === 'review_carefully' ? '👀 Review' : '↩ Skip'}
+                          </span>
+                        ) : null}
+                      </Cell>
+
+                      <td className="px-2 py-2.5">
+                        <button onClick={() => setExpanded(expanded === job.id ? null : job.id)}
+                          className="text-gray-500 hover:text-gray-300 text-xs whitespace-nowrap">
+                          {expanded === job.id ? '▲' : '▼'}
+                        </button>
                       </td>
                     </tr>
-                  )}
-                </>
-              ))}
+
+                    {/* Expanded detail row */}
+                    {expanded === job.id && (
+                      <tr key={`${job.id}-exp`}>
+                        <td colSpan={13} className="bg-gray-950/70 border-t border-b border-gray-800 px-6 py-4">
+                          <div className="grid grid-cols-3 gap-6">
+
+                            {/* Col 1: AI Ranking */}
+                            <div className="space-y-3">
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">AI Analysis</p>
+                              {job.ai_ranking ? (
+                                <>
+                                  {job.ai_ranking.key_skills && (
+                                    <div>
+                                      <p className="text-xs text-gray-500 mb-0.5">Key Skills Match</p>
+                                      <p className="text-sm text-green-300">{job.ai_ranking.key_skills}</p>
+                                    </div>
+                                  )}
+                                  {job.ai_ranking.tailoring_notes && (
+                                    <div>
+                                      <p className="text-xs text-gray-500 mb-0.5">Tailoring Tips</p>
+                                      <p className="text-sm text-blue-300">{job.ai_ranking.tailoring_notes}</p>
+                                    </div>
+                                  )}
+                                  {job.ai_ranking.red_flags && (
+                                    <div>
+                                      <p className="text-xs text-gray-500 mb-0.5">Red Flags</p>
+                                      <p className="text-sm text-red-300">{job.ai_ranking.red_flags}</p>
+                                    </div>
+                                  )}
+                                  {job.ai_ranking.reason && (
+                                    <div>
+                                      <p className="text-xs text-gray-500 mb-0.5">Reason</p>
+                                      <p className="text-sm text-gray-300">{job.ai_ranking.reason}</p>
+                                    </div>
+                                  )}
+                                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs pt-1">
+                                    {[
+                                      ['Beginner Friendly', job.ai_ranking.beginner_friendly],
+                                      ['GTO/Traineeship', job.ai_ranking.gto_traineeship],
+                                      ['Training Offered', job.ai_ranking.training_offered],
+                                      ['Cert III Pathway', job.ai_ranking.cert3_pathway],
+                                      ['Prior School Req.', job.ai_ranking.prior_school_required],
+                                      ['Qual. Risk', job.ai_ranking.qualification_risk],
+                                      ['Exp. Risk', job.ai_ranking.experience_risk],
+                                      ['Resume Version', job.ai_ranking.resume_version?.replace(/_/g, ' ')],
+                                      ['Cover Letter', job.ai_ranking.cover_letter_needed],
+                                    ].filter(([, v]) => v).map(([label, val]) => (
+                                      <div key={label as string}>
+                                        <span className="text-gray-500">{label}: </span>
+                                        <span className="text-gray-200 capitalize">{val}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : (
+                                <p className="text-gray-600 text-xs">Not yet ranked — click ⚡ Rank All</p>
+                              )}
+                            </div>
+
+                            {/* Col 2: Job Details from Apify */}
+                            <div className="space-y-3">
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Job Details</p>
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                                {[
+                                  ['Area', rp.joblocationInfo?.area],
+                                  ['Suburb', rp.joblocationInfo?.suburb],
+                                  ['Display Location', rp.joblocationInfo?.displayLocation],
+                                  ['Work Type', rp.workTypes || job.work_type],
+                                  ['Arrangement', rp.workArrangements],
+                                  ['Salary', rp.salary || job.salary_text],
+                                  ['Applicants', rp.numApplicants?.toString()],
+                                  ['Resume %', rp.resumePercentage != null ? `${rp.resumePercentage}%` : undefined],
+                                  ['Cover Letter %', rp.coverLetterPercentage != null ? `${rp.coverLetterPercentage}%` : undefined],
+                                  ['Posted', job.posted_at ? new Date(job.posted_at).toLocaleDateString('en-AU') : undefined],
+                                  ['Source', job.source],
+                                ].filter(([, v]) => v != null && v !== '').map(([label, val]) => (
+                                  <div key={label as string}>
+                                    <span className="text-gray-500">{label}: </span>
+                                    <span className="text-gray-200">{val}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Col 3: Links + Apply */}
+                            <div className="space-y-3">
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Links & Apply</p>
+                              <div className="space-y-2">
+                                {(rp.jobLink || job.url) && (
+                                  <a href={(rp.jobLink || job.url) as string} target="_blank" rel="noopener noreferrer"
+                                    className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs text-gray-300 transition-colors">
+                                    🔗 View on {job.source === 'seek' ? 'Seek' : 'Indeed'}
+                                  </a>
+                                )}
+                                {rp.applyLink && rp.applyLink !== rp.jobLink && (
+                                  <a href={rp.applyLink as string} target="_blank" rel="noopener noreferrer"
+                                    className="flex items-center gap-2 px-3 py-2 bg-indigo-900 hover:bg-indigo-800 rounded-lg text-xs text-indigo-300 transition-colors">
+                                    ✉️ Apply directly
+                                  </a>
+                                )}
+                                <button
+                                  onClick={() => alert('Generate Resume + Cover Letter — coming in Phase 6')}
+                                  className="w-full px-3 py-2 bg-green-900/50 hover:bg-green-900 rounded-lg text-xs text-green-300 transition-colors text-left">
+                                  📄 Generate Resume + Cover Letter
+                                </button>
+                                <button onClick={() => handleDeleteJob(job.id)}
+                                  className="w-full px-3 py-2 bg-red-950 hover:bg-red-900 rounded-lg text-xs text-red-400 transition-colors text-left">
+                                  🗑 Remove job
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                )
+              })}
             </tbody>
           </table>
         </div>

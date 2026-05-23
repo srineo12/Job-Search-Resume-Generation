@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     .from('jobs')
     .select(`
       id, title, employer, location, work_type, salary_text,
-      posted_at, url, status, source,
+      posted_at, url, status, source, raw_payload,
       ai_score, ai_priority, ai_ranking, ai_ranked_at,
       created_at, import_id
     `)
@@ -51,4 +51,13 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({ jobs: data || [], counts, total: count })
+}
+
+export async function DELETE(request: NextRequest) {
+  const { supabase, user } = await getAuth()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { id } = await request.json()
+  const { error } = await supabase.from('jobs').delete().eq('id', id).eq('user_id', user.id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ success: true })
 }

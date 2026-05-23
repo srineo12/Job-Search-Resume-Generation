@@ -34,6 +34,7 @@ export default function ImportsPage() {
   const [titleSets, setTitleSets] = useState<KeywordSet[]>([])
   const [triggering, setTriggering] = useState(false)
   const [refreshing, setRefreshing] = useState<string | null>(null)
+  const [autoRanking, setAutoRanking] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [expandedImport, setExpandedImport] = useState<string | null>(null)
@@ -114,12 +115,38 @@ export default function ImportsPage() {
   async function handleRefresh(importId: string) {
     setRefreshing(importId)
     setError('')
+    setSuccess('')
     try {
       const res = await fetch(`/api/imports/${importId}/refresh`)
       const d = await res.json()
       if (!res.ok) { setError(d.error || 'Refresh failed'); return }
-      setSuccess(d.message || `Status: ${d.import?.status}`)
       loadImports()
+
+      // Auto-rank immediately after jobs are inserted
+      if (d.import?.status === 'succeeded' && (d.import?.stats?.inserted ?? 0) > 0) {
+        setSuccess(`✓ ${d.import.stats.inserted} jobs imported — ranking with AI now...`)
+        setAutoRanking(true)
+        try {
+          let total = 0
+          while (true) {
+            const rr = await fetch('/api/jobs/rank-batch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ import_id: importId, limit: 20 }),
+            })
+            const rd = await rr.json()
+            total += rd.ranked || 0
+            if (!rd.ranked || rd.remaining === 0) break
+          }
+          setSuccess(`✓ ${d.import.stats.inserted} jobs imported and ${total} ranked. Go to Jobs →`)
+        } catch {
+          setSuccess(`✓ ${d.import.stats.inserted} jobs imported. Ranking failed — try "Rank All" in Jobs.`)
+        } finally {
+          setAutoRanking(false)
+        }
+      } else {
+        setSuccess(d.message || `Status: ${d.import?.status}`)
+      }
     } catch (err) {
       setError(String(err))
     } finally {
@@ -159,7 +186,8 @@ export default function ImportsPage() {
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-950 border border-red-800 rounded-lg text-red-400 text-sm">{error}</div>}
-      {success && <div className="mb-4 p-3 bg-green-950 border border-green-800 rounded-lg text-green-400 text-sm">{success}</div>}
+      {autoRanking && <div className="mb-4 p-3 bg-indigo-950 border border-indigo-800 rounded-lg text-indigo-300 text-sm flex items-center gap-2">⚙️ Ranking jobs with AI — this takes ~30s…</div>}
+      {success && !autoRanking && <div className="mb-4 p-3 bg-green-950 border border-green-800 rounded-lg text-green-400 text-sm">{success}</div>}
 
       {/* Form */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
@@ -272,9 +300,9 @@ export default function ImportsPage() {
                       </div>
                       <div className="flex gap-2 shrink-0">
                         {(imp.status === 'queued' || imp.status === 'running') && (
-                          <button onClick={() => handleRefresh(imp.id)} disabled={refreshing === imp.id}
+                          <button onClick={() => handleRefresh(imp.id)} disabled={refreshing === imp.id || autoRanking}
                             className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white rounded-lg">
-                            {refreshing === imp.id ? 'Checking...' : 'Check Status'}
+                            {refreshing === imp.id ? 'Checking...' : autoRanking ? 'Ranking...' : 'Check Status'}
                           </button>
                         )}
                         {imp.status === 'succeeded' && (

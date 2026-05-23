@@ -47,7 +47,9 @@ Respond ONLY with valid JSON (no markdown, no explanation):
   "reason": "1-2 sentence explanation of priority",
   "key_skills": "top 3 matching skills from this job",
   "red_flags": "any disqualifying requirements or concerns",
-  "tailoring_notes": "specific tip for applying to this role"
+  "tailoring_notes": "specific tip for applying to this role",
+  "ranking_comments": ["bullet 1: why score is high or low", "bullet 2: key factor", "bullet 3: any risk or boost"],
+  "role_description": ["bullet 1: what the role involves day-to-day", "bullet 2: type of work/environment", "bullet 3: who they support or work with"]
 }`
 
 export async function POST(request: NextRequest) {
@@ -134,8 +136,9 @@ export async function POST(request: NextRequest) {
 
       ranked++
     } catch (err) {
-      console.error(`Error ranking job ${job.id}:`, err)
-      errors.push(String(err))
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`Error ranking job ${job.id}:`, msg)
+      errors.push(`${job.title}: ${msg}`)
     }
   }
 
@@ -151,6 +154,11 @@ export async function POST(request: NextRequest) {
     ranked,
     remaining: remaining || 0,
     errors: errors.length,
-    message: `Ranked ${ranked} jobs. ${remaining || 0} still unranked.`,
+    error_details: errors,
+    message: ranked > 0
+      ? `Ranked ${ranked} jobs. ${remaining || 0} still unranked.`
+      : errors.length > 0
+        ? `0 ranked — errors: ${errors.slice(0, 2).join(' | ')}`
+        : `No unranked jobs found.`,
   })
 }

@@ -30,6 +30,8 @@ interface Job {
     key_skills?: string
     red_flags?: string
     tailoring_notes?: string
+    ranking_comments?: string[]
+    role_description?: string[]
   } | null
   ai_ranked_at: string | null
   description_text: string | null
@@ -162,10 +164,13 @@ export default function JobsPage() {
       })
       const d = await res.json()
       total += d.ranked || 0
-      if (!d.ranked || d.remaining === 0) break
+      if (!d.ranked || d.remaining === 0) {
+        if (d.errors > 0) setRankProgress(`⚠️ ${d.message}`)
+        break
+      }
       setRankProgress(`Ranked ${total}... ${d.remaining} remaining`)
     }
-    setRankProgress(`Done — ${total} jobs ranked`)
+    if (total > 0) setRankProgress(`Done — ${total} jobs ranked`)
     loadJobs()
     setTimeout(() => { setRanking(false); setRankProgress('') }, 3000)
   }
@@ -283,6 +288,8 @@ export default function JobsPage() {
                 <th className="px-3 py-3 text-left w-56 sticky left-8 bg-gray-900 z-10">Job Title</th>
                 <th className="px-3 py-3 text-left w-36">Employer</th>
                 <th className="px-3 py-3 text-left w-44">Location</th>
+                <th className="px-3 py-3 text-left w-48">Role Description</th>
+                <th className="px-3 py-3 text-left w-48">Ranking Comments</th>
                 <th className="px-3 py-3 text-center w-14">Score</th>
                 <th className="px-3 py-3 text-left w-24">Priority</th>
                 <th className="px-3 py-3 text-left w-36">Salary</th>
@@ -328,6 +335,30 @@ export default function JobsPage() {
 
                       <Cell className="text-gray-400">
                         <span className="block truncate max-w-[168px]" title={job.location}>{job.location || '—'}</span>
+                      </Cell>
+
+                      {/* Role Description */}
+                      <Cell className="text-gray-400 max-w-[180px]">
+                        {job.ai_ranking?.role_description?.length ? (
+                          <span
+                            className="block truncate"
+                            title={job.ai_ranking.role_description.join('\n')}
+                          >
+                            {job.ai_ranking.role_description[0]}
+                          </span>
+                        ) : <span className="text-gray-700">—</span>}
+                      </Cell>
+
+                      {/* Ranking Comments */}
+                      <Cell className="text-gray-400 max-w-[180px]">
+                        {job.ai_ranking?.ranking_comments?.length ? (
+                          <span
+                            className="block truncate"
+                            title={job.ai_ranking.ranking_comments.join('\n')}
+                          >
+                            {job.ai_ranking.ranking_comments[0]}
+                          </span>
+                        ) : <span className="text-gray-700">—</span>}
                       </Cell>
 
                       <Cell className="text-center"><ScoreBadge score={job.ai_score} /></Cell>
@@ -376,7 +407,7 @@ export default function JobsPage() {
                     {/* Expanded detail row */}
                     {expanded === job.id && (
                       <tr key={`${job.id}-exp`}>
-                        <td colSpan={13} className="bg-gray-950 border-t border-b border-gray-800 px-6 py-5">
+                        <td colSpan={15} className="bg-gray-950 border-t border-b border-gray-800 px-6 py-5">
 
                           {/* Top 3 panels */}
                           <div className="grid grid-cols-3 gap-6 mb-5">
@@ -394,6 +425,26 @@ export default function JobsPage() {
                                   )}
                                   {job.ai_ranking.tailoring_notes && (
                                     <div><p className="text-xs text-gray-500">Tailoring Tips</p><p className="text-sm text-blue-300">{job.ai_ranking.tailoring_notes}</p></div>
+                                  )}
+                                  {job.ai_ranking.role_description?.length && (
+                                    <div>
+                                      <p className="text-xs text-gray-500 mb-1">Role Description</p>
+                                      <ul className="space-y-0.5">
+                                        {job.ai_ranking.role_description.map((b, i) => (
+                                          <li key={i} className="text-sm text-cyan-300">• {b}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {job.ai_ranking.ranking_comments?.length && (
+                                    <div>
+                                      <p className="text-xs text-gray-500 mb-1">Why this score</p>
+                                      <ul className="space-y-0.5">
+                                        {job.ai_ranking.ranking_comments.map((b, i) => (
+                                          <li key={i} className="text-sm text-amber-300">• {b}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
                                   )}
                                   {job.ai_ranking.reason && (
                                     <div><p className="text-xs text-gray-500">Ranking Reason</p><p className="text-sm text-gray-300">{job.ai_ranking.reason}</p></div>

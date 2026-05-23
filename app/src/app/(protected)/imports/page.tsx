@@ -14,7 +14,8 @@ interface Import {
   id: string
   source: 'seek' | 'indeed'
   status: 'queued' | 'running' | 'succeeded' | 'failed'
-  stats?: { fetched?: number; inserted?: number; duplicates_by_url?: number; duplicates_by_employer_title?: number }
+  stats?: { fetched?: number; inserted?: number; duplicates_by_url?: number; duplicates_by_employer_title?: number; title_filtered?: number }
+  input_payload?: { url?: string; maxResults?: number; include_in_title?: string[] }
   error_message?: string
   created_at: string
 }
@@ -238,7 +239,7 @@ export default function ImportsPage() {
               {imports.map(imp => {
                 const dupes = (imp.stats?.duplicates_by_url || 0) + (imp.stats?.duplicates_by_employer_title || 0)
                 return (
-                  <div key={imp.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between gap-4">
+                  <div key={imp.id} className="group bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <span className="text-white font-medium capitalize">{imp.source}</span>
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
@@ -251,11 +252,18 @@ export default function ImportsPage() {
                         {imp.status === 'succeeded' && '✓ Done'}
                         {imp.status === 'failed' && '✗ Failed'}
                       </span>
-                      <span className="text-gray-500 text-xs truncate">
-                        {imp.status === 'succeeded' && imp.stats ? `${imp.stats.inserted} new · ${dupes} dupes` : ''}
+                      <span className="text-gray-500 text-xs truncate max-w-xs">
+                        {imp.status === 'succeeded' && imp.stats
+                          ? `${imp.stats.inserted} new · ${dupes} dupes · ${imp.stats.title_filtered ?? 0} title-filtered`
+                          : ''}
                         {imp.status === 'failed' && imp.error_message ? imp.error_message : ''}
                         {(imp.status === 'queued' || imp.status === 'running') ? new Date(imp.created_at).toLocaleString() : ''}
                       </span>
+                      {imp.input_payload?.url && (
+                        <span className="text-gray-700 text-xs truncate max-w-sm hidden group-hover:block" title={imp.input_payload.url}>
+                          🔗 {imp.input_payload.url.slice(0, 60)}…
+                        </span>
+                      )}
                     </div>
                     <div className="flex gap-2 shrink-0">
                       {(imp.status === 'queued' || imp.status === 'running') && (

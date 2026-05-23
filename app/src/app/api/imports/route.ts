@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
-/** Build a seek.com.au search URL from keywords + filters */
+/** Build a seek.com.au search URL from keywords + filters.
+ *
+ * Multi-word keywords (e.g. "teacher aide") are quoted so Seek treats them as phrases.
+ * Multiple keywords are joined with OR so Seek returns any matching role.
+ * Example: keywords=["teacher aide","teaching assistant"] →
+ *   ?keywords="teacher aide" OR "teaching assistant"
+ */
 function buildSeekUrl(keywords: string[], date_range: string): string {
-  // Use the classification-based URL for education/childcare jobs
-  // and pass keywords as the search query
+  // Quote multi-word phrases, then join with OR for any-match behaviour
+  const keywordQuery = keywords
+    .map(k => k.trim())
+    .filter(Boolean)
+    .map(k => (k.includes(' ') ? `"${k}"` : k))
+    .join(' OR ')
+
   const params = new URLSearchParams()
-  params.set('keywords', keywords.join(' '))
+  params.set('keywords', keywordQuery)
   params.set('where', 'Melbourne VIC')
   params.set('distance', '50')
   if (date_range) {
@@ -89,12 +100,12 @@ export async function POST(request: NextRequest) {
     ? buildSeekUrl(allKeywords, date_range)
     : buildIndeedUrl(allKeywords, date_range)
 
-  // Build Apify input
-  // websift/seek-job-scraper uses 'maximumResults' (not 'maxItems') to cap results
+  // Build Apify input.
+  // websift/seek-job-scraper's actual controlling field is 'maxResults' (confirmed from
+  // exported run JSON — actor ignores 'maxItems' and 'maximumResults').
   const apifyInput = {
     url: searchUrl,
-    maximumResults: maxItemsCapped,   // correct field name for this actor
-    maxItems: maxItemsCapped,         // fallback in case actor checks either
+    maxResults: maxItemsCapped,   // ← actual field the actor respects
   }
 
   // Apify URLs use '~' instead of '/' in actor IDs

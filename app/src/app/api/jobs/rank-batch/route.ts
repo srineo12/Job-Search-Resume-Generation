@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
         model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
         messages: [
           { role: 'system', content: fullSystemPrompt },
-          { role: 'user', content: `Rank this job for Priyadharshini:\n\n${jobDesc}` },
+          { role: 'user', content: `Rank this job for Priyadharshini and respond with valid JSON only:\n\n${jobDesc}` },
         ],
         response_format: { type: 'json_object' },
         temperature: 0.3,

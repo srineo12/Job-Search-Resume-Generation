@@ -109,7 +109,6 @@ const ALL_COLS: ColDef[] = [
   { key: 'arrangement',       label: 'Arrangement', defaultWidth: 115, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
   { key: 'applicants',        label: 'Applicants',  defaultWidth: 90,  sortable: true,  filterable: false, filterType: 'text' },
   { key: 'posted_at',         label: 'Posted',      defaultWidth: 80,  sortable: true,  filterable: false, filterType: 'text' },
-  { key: 'actions',           label: 'Actions',     defaultWidth: 210, sortable: false, filterable: false, filterType: 'text' },
 ]
 
 const LS_KEY = 'jobs-col-layout-v2'
@@ -578,8 +577,17 @@ export default function JobsPage() {
                             </td>
 
                           case 'workflow_status':
-                            return <td key={col.key} className="px-2 py-2">
-                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${WF_STYLE[wf]}`}>{WF_LABEL[wf]}</span>
+                            return <td key={col.key} className="px-2 py-1.5">
+                              <select
+                                value={wf}
+                                onChange={e => setWorkflow(job.id, e.target.value, e.target.value === 'applied' ? job.url : undefined)}
+                                className={`w-full rounded px-1.5 py-0.5 text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 ${WF_STYLE[wf]}`}
+                              >
+                                <option value="open">Open</option>
+                                <option value="generated">Generated</option>
+                                <option value="applied">Applied</option>
+                                <option value="discarded">Discarded</option>
+                              </select>
                             </td>
 
                           case 'salary_text':
@@ -598,28 +606,6 @@ export default function JobsPage() {
 
                           case 'posted_at':
                             return <td key={col.key} className="px-2 py-2 text-white">{relDate(job.posted_at)}</td>
-
-                          case 'actions':
-                            return <td key={col.key} className="px-2 py-2">
-                              <div className="flex gap-1 flex-wrap">
-                                {wf !== 'generated' && (
-                                  <button onClick={() => setWorkflow(job.id, 'generated')}
-                                    className="px-1.5 py-0.5 bg-blue-900 hover:bg-blue-800 text-blue-200 text-xs rounded">📄 Gen</button>
-                                )}
-                                {wf !== 'applied' && (
-                                  <button onClick={() => setWorkflow(job.id, 'applied', job.url)}
-                                    className="px-1.5 py-0.5 bg-green-900 hover:bg-green-800 text-green-200 text-xs rounded">✓ Apply</button>
-                                )}
-                                {wf !== 'discarded' && (
-                                  <button onClick={() => setWorkflow(job.id, 'discarded')}
-                                    className="px-1.5 py-0.5 bg-red-950 hover:bg-red-900 text-red-400 text-xs rounded">✗ Discard</button>
-                                )}
-                                {wf !== 'open' && (
-                                  <button onClick={() => setWorkflow(job.id, 'open')}
-                                    className="px-1.5 py-0.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded">↺ Open</button>
-                                )}
-                              </div>
-                            </td>
 
                           default:
                             return <td key={col.key} className="px-2 py-2 text-gray-600">—</td>

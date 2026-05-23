@@ -1,9 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface Job {
   id: string
+  source_job_id: string
   title: string
   employer: string
   location: string
@@ -36,7 +39,6 @@ interface Job {
   ai_ranked_at: string | null
   description_text: string | null
   description_html: string | null
-  // raw_payload for all Apify fields
   raw_payload: {
     numApplicants?: number
     resumePercentage?: number
@@ -50,154 +52,274 @@ interface Job {
     isVerified?: boolean
     listedAt?: string
     expiresAtUtc?: string
-    joblocationInfo?: {
-      area?: string
-      displayLocation?: string
-      location?: string
-      suburb?: string
-      country?: string
-    }
-    classificationInfo?: {
-      classification?: string
-      subClassification?: string
-    }
-    content?: {
-      jobHook?: string
-      bulletPoints?: string[]
-      sections?: string[]
-      unEditedContent?: string
-    }
+    joblocationInfo?: { area?: string; displayLocation?: string; location?: string; suburb?: string }
+    classificationInfo?: { classification?: string; subClassification?: string }
+    content?: { jobHook?: string; bulletPoints?: string[]; sections?: string[]; unEditedContent?: string }
     employerQuestions?: string[]
     [key: string]: unknown
   } | null
 }
 
-const PRIORITY_STYLES: Record<string, string> = {
-  hot: 'bg-red-900/60 text-red-300 border-red-700',
-  good: 'bg-green-900/60 text-green-300 border-green-700',
-  maybe: 'bg-yellow-900/60 text-yellow-300 border-yellow-700',
-  avoid: 'bg-gray-800 text-gray-500 border-gray-700',
+interface Counts {
+  total: number; hot: number; good: number; maybe: number; avoid: number; unranked: number
+  open: number; generated: number; applied: number; discarded: number
 }
-const PRIORITY_LABELS: Record<string, string> = {
+
+// ─── Workflow helpers ─────────────────────────────────────────────────────────
+
+function wfOf(status: string): 'open' | 'generated' | 'applied' | 'discarded' {
+  if (status === 'documents_generated') return 'generated'
+  if (status === 'applied') return 'applied'
+  if (status === 'skipped') return 'discarded'
+  return 'open'
+}
+
+const WF_STYLE: Record<string, string> = {
+  open:      'bg-gray-700 text-white',
+  generated: 'bg-blue-800 text-blue-200',
+  applied:   'bg-green-800 text-green-200',
+  discarded: 'bg-red-950 text-red-400',
+}
+const WF_LABEL: Record<string, string> = {
+  open: 'Open', generated: 'Generated', applied: 'Applied', discarded: 'Discarded',
+}
+
+// ─── Column definitions ───────────────────────────────────────────────────────
+
+interface ColDef {
+  key: string; label: string; defaultWidth: number
+  sortable: boolean; filterable: boolean
+  filterType: 'text' | 'select' | 'range'
+  filterOptions?: string[]
+  sticky?: boolean
+}
+
+const ALL_COLS: ColDef[] = [
+  { key: 'source_job_id',     label: 'Job ID',      defaultWidth: 90,  sortable: true,  filterable: true,  filterType: 'text' },
+  { key: 'title',             label: 'Job Title',   defaultWidth: 230, sortable: true,  filterable: true,  filterType: 'text', sticky: true },
+  { key: 'employer',          label: 'Employer',    defaultWidth: 140, sortable: true,  filterable: true,  filterType: 'text' },
+  { key: 'location',          label: 'Location',    defaultWidth: 160, sortable: true,  filterable: true,  filterType: 'text' },
+  { key: 'role_description',  label: 'Role',        defaultWidth: 190, sortable: false, filterable: false, filterType: 'text' },
+  { key: 'ranking_comments',  label: 'Why',         defaultWidth: 190, sortable: false, filterable: false, filterType: 'text' },
+  { key: 'ai_score',          label: 'Score',       defaultWidth: 65,  sortable: true,  filterable: true,  filterType: 'range' },
+  { key: 'ai_priority',       label: 'Priority',    defaultWidth: 95,  sortable: true,  filterable: true,  filterType: 'select', filterOptions: ['hot','good','maybe','avoid'] },
+  { key: 'workflow_status',   label: 'Status',      defaultWidth: 100, sortable: true,  filterable: true,  filterType: 'select', filterOptions: ['open','generated','applied','discarded'] },
+  { key: 'salary_text',       label: 'Salary',      defaultWidth: 145, sortable: false, filterable: true,  filterType: 'text' },
+  { key: 'work_type',         label: 'Type',        defaultWidth: 100, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
+  { key: 'arrangement',       label: 'Arrangement', defaultWidth: 115, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
+  { key: 'applicants',        label: 'Applicants',  defaultWidth: 90,  sortable: true,  filterable: false, filterType: 'text' },
+  { key: 'posted_at',         label: 'Posted',      defaultWidth: 80,  sortable: true,  filterable: false, filterType: 'text' },
+  { key: 'actions',           label: 'Actions',     defaultWidth: 210, sortable: false, filterable: false, filterType: 'text' },
+]
+
+const LS_KEY = 'jobs-col-layout-v2'
+
+function loadLayout() {
+  if (typeof window === 'undefined') return null
+  try { const s = localStorage.getItem(LS_KEY); return s ? JSON.parse(s) : null } catch { return null }
+}
+function saveLayout(order: string[], widths: Record<string, number>) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ order, widths })) } catch {}
+}
+
+// ─── Misc helpers ─────────────────────────────────────────────────────────────
+
+const PRI_STYLE: Record<string, string> = {
+  hot: 'bg-red-900/60 text-red-300 border border-red-700',
+  good: 'bg-green-900/60 text-green-300 border border-green-700',
+  maybe: 'bg-yellow-900/60 text-yellow-300 border border-yellow-700',
+  avoid: 'bg-gray-800 text-gray-400 border border-gray-700',
+}
+const PRI_LABEL: Record<string, string> = {
   hot: '🔥 Hot', good: '✅ Good', maybe: '🤔 Maybe', avoid: '❌ Avoid',
 }
 
-function relativeDate(dateStr: string) {
-  if (!dateStr) return '—'
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const d = Math.floor(diff / 86400000)
-  if (d === 0) return 'Today'
-  if (d === 1) return '1d ago'
-  if (d < 30) return `${d}d ago`
-  return new Date(dateStr).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
+function relDate(d: string) {
+  if (!d) return '—'
+  const diff = Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
+  if (diff === 0) return 'Today'
+  if (diff === 1) return '1d ago'
+  if (diff < 30) return `${diff}d ago`
+  return new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
 }
 
-function ScoreBadge({ score }: { score: number | null }) {
-  if (score == null) return <span className="text-gray-700 text-sm">—</span>
-  const color = score >= 70 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-red-400'
-  return <span className={`text-base font-bold ${color}`}>{score}</span>
-}
-
-function Cell({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return (
-    <td className={`px-3 py-2.5 whitespace-nowrap text-xs ${className}`}>
-      {children}
-    </td>
-  )
-}
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export default function JobsPage() {
-  const [jobs, setJobs] = useState<Job[]>([])
-  const [loading, setLoading] = useState(true)
+  const [jobs, setJobs]         = useState<Job[]>([])
+  const [counts, setCounts]     = useState<Counts>({ total:0,hot:0,good:0,maybe:0,avoid:0,unranked:0,open:0,generated:0,applied:0,discarded:0 })
+  const [loading, setLoading]   = useState(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [filter, setFilter] = useState<string>('all')
-  const [sortBy, setSortBy] = useState<'score' | 'posted'>('score')
-  const [ranking, setRanking] = useState(false)
-  const [rankProgress, setRankProgress] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [ranking, setRanking]   = useState(false)
+  const [rankMsg, setRankMsg]   = useState('')
+
+  // Filters
+  const [priFilter,  setPriFilter]  = useState('all')
+  const [wfFilter,   setWfFilter]   = useState('all')
+  const [colFilters, setColFilters] = useState<Record<string, string>>({})
+  const [scoreMin,   setScoreMin]   = useState('')
+
+  // Sort
+  const [sortKey, setSortKey] = useState<string>('ai_score')
+  const [sortDir, setSortDir] = useState<'asc'|'desc'|null>('desc')
+
+  // Column layout
+  const saved = loadLayout()
+  const [colOrder,  setColOrder]  = useState<string[]>(saved?.order  ?? ALL_COLS.map(c => c.key))
+  const [colWidths, setColWidths] = useState<Record<string,number>>(saved?.widths ?? Object.fromEntries(ALL_COLS.map(c => [c.key, c.defaultWidth])))
+  const [layoutSaved, setLayoutSaved] = useState(false)
+
+  // Drag for reorder
+  const dragFrom = useRef<string | null>(null)
 
   const loadJobs = useCallback(async () => {
     setLoading(true)
     const res = await fetch('/api/jobs')
     const d = await res.json()
     setJobs(d.jobs || [])
+    setCounts(d.counts || {})
     setLoading(false)
   }, [])
 
   useEffect(() => { loadJobs() }, [loadJobs])
 
-  const filtered = jobs
+  // ── Filter + sort pipeline ────────────────────────────────────────────────
+  const visible = jobs
     .filter(j => {
-      if (filter === 'unranked') return !j.ai_ranked_at
-      if (filter === 'hot') return j.ai_priority === 'hot'
-      if (filter === 'good') return j.ai_priority === 'good'
-      if (filter === 'maybe') return j.ai_priority === 'maybe'
-      if (filter === 'avoid') return j.ai_priority === 'avoid'
+      if (priFilter !== 'all') {
+        if (priFilter === 'unranked' && j.ai_ranked_at) return false
+        if (priFilter !== 'unranked' && j.ai_priority !== priFilter) return false
+      }
+      if (wfFilter !== 'all' && wfOf(j.status) !== wfFilter) return false
+      if (colFilters.title     && !j.title?.toLowerCase().includes(colFilters.title.toLowerCase()))    return false
+      if (colFilters.employer  && !j.employer?.toLowerCase().includes(colFilters.employer.toLowerCase())) return false
+      if (colFilters.location  && !j.location?.toLowerCase().includes(colFilters.location.toLowerCase())) return false
+      if (colFilters.salary_text && !j.salary_text?.toLowerCase().includes(colFilters.salary_text.toLowerCase())) return false
+      if (colFilters.work_type && j.work_type !== colFilters.work_type) return false
+      if (colFilters.arrangement && (j.raw_payload?.workArrangements ?? '') !== colFilters.arrangement) return false
+      if (colFilters.ai_priority && j.ai_priority !== colFilters.ai_priority) return false
+      if (colFilters.workflow_status && wfOf(j.status) !== colFilters.workflow_status) return false
+      if (scoreMin && (j.ai_score ?? 0) < parseInt(scoreMin)) return false
       return true
     })
     .sort((a, b) => {
-      if (sortBy === 'score') {
-        const sa = a.ai_score ?? -1, sb = b.ai_score ?? -1
-        if (sb !== sa) return sb - sa
-      }
-      return new Date(b.posted_at || 0).getTime() - new Date(a.posted_at || 0).getTime()
+      if (!sortKey || !sortDir) return 0
+      let av: unknown, bv: unknown
+      if (sortKey === 'ai_score')     { av = a.ai_score ?? -1; bv = b.ai_score ?? -1 }
+      else if (sortKey === 'posted_at') { av = a.posted_at; bv = b.posted_at }
+      else if (sortKey === 'employer')  { av = a.employer; bv = b.employer }
+      else if (sortKey === 'title')     { av = a.title; bv = b.title }
+      else if (sortKey === 'location')  { av = a.location; bv = b.location }
+      else if (sortKey === 'ai_priority') { const o={hot:4,good:3,maybe:2,avoid:1} as Record<string,number>; av=o[a.ai_priority??'']??0; bv=o[b.ai_priority??'']??0 }
+      else if (sortKey === 'workflow_status') { av = wfOf(a.status); bv = wfOf(b.status) }
+      else if (sortKey === 'applicants') { av = a.raw_payload?.numApplicants ?? -1; bv = b.raw_payload?.numApplicants ?? -1 }
+      else return 0
+      if (av === bv) return 0
+      const cmp = (av as string | number) < (bv as string | number) ? -1 : 1
+      return sortDir === 'asc' ? cmp : -cmp
     })
 
-  const counts = {
-    total: jobs.length,
-    unranked: jobs.filter(j => !j.ai_ranked_at).length,
-    hot: jobs.filter(j => j.ai_priority === 'hot').length,
-    good: jobs.filter(j => j.ai_priority === 'good').length,
-    maybe: jobs.filter(j => j.ai_priority === 'maybe').length,
-    avoid: jobs.filter(j => j.ai_priority === 'avoid').length,
+  // Unique values for select filters
+  const workTypes   = [...new Set(jobs.map(j => j.work_type).filter(Boolean))]
+  const arrangements = [...new Set(jobs.map(j => j.raw_payload?.workArrangements as string).filter(Boolean))]
+
+  // ── Column resize ─────────────────────────────────────────────────────────
+  function startResize(key: string, e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startW = colWidths[key] ?? 120
+    function onMove(ev: MouseEvent) {
+      setColWidths(prev => ({ ...prev, [key]: Math.max(50, startW + ev.clientX - startX) }))
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
   }
 
+  // ── Column sort (double-click) ────────────────────────────────────────────
+  function onHeaderDblClick(key: string, col: ColDef) {
+    if (!col.sortable) return
+    if (sortKey !== key) { setSortKey(key); setSortDir('desc') }
+    else if (sortDir === 'desc') setSortDir('asc')
+    else { setSortDir(null); setSortKey('') }
+  }
+
+  // ── Column reorder (drag) ─────────────────────────────────────────────────
+  function onDragStart(key: string) { dragFrom.current = key }
+  function onDrop(targetKey: string) {
+    if (!dragFrom.current || dragFrom.current === targetKey) return
+    const from = dragFrom.current
+    setColOrder(prev => {
+      const arr = [...prev]
+      const fi = arr.indexOf(from), ti = arr.indexOf(targetKey)
+      arr.splice(fi, 1); arr.splice(ti, 0, from)
+      return arr
+    })
+    dragFrom.current = null
+  }
+
+  // ── Save layout ───────────────────────────────────────────────────────────
+  function handleSaveLayout() {
+    saveLayout(colOrder, colWidths)
+    setLayoutSaved(true)
+    setTimeout(() => setLayoutSaved(false), 2000)
+  }
+
+  // ── Workflow status update ────────────────────────────────────────────────
+  async function setWorkflow(jobId: string, workflow: string, url?: string) {
+    if (workflow === 'applied' && url) window.open(url, '_blank')
+    if (workflow === 'generated') { alert('Resume & Cover Letter generation coming in Phase 6.') }
+    await fetch('/api/jobs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: jobId, workflow }),
+    })
+    setJobs(prev => prev.map(j => {
+      if (j.id !== jobId) return j
+      const dbStatus = workflow === 'generated' ? 'documents_generated'
+        : workflow === 'applied' ? 'applied'
+        : workflow === 'discarded' ? 'skipped'
+        : j.ai_ranked_at ? 'ranked' : 'imported'
+      return { ...j, status: dbStatus }
+    }))
+  }
+
+  // ── Bulk workflow ─────────────────────────────────────────────────────────
+  async function bulkWorkflow(workflow: string) {
+    for (const id of selected) {
+      const job = jobs.find(j => j.id === id)
+      await setWorkflow(id, workflow, workflow === 'applied' ? job?.url : undefined)
+    }
+    setSelected(new Set())
+  }
+
+  // ── Rank all ──────────────────────────────────────────────────────────────
   async function handleRankAll() {
-    setRanking(true)
-    let total = 0
+    setRanking(true); let total = 0
     while (true) {
-      setRankProgress(`Ranking... ${total} done`)
-      const res = await fetch('/api/jobs/rank-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: 20 }),
-      })
+      setRankMsg(`Ranking… ${total} done`)
+      const res = await fetch('/api/jobs/rank-batch', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({limit:20}) })
       const d = await res.json()
       total += d.ranked || 0
       if (!d.ranked || d.remaining === 0) {
-        if (d.errors > 0) setRankProgress(`⚠️ ${d.message}`)
+        if (d.errors > 0) setRankMsg(`⚠️ ${d.message}`)
         break
       }
-      setRankProgress(`Ranked ${total}... ${d.remaining} remaining`)
+      setRankMsg(`Ranked ${total}… ${d.remaining} remaining`)
     }
-    if (total > 0) setRankProgress(`Done — ${total} jobs ranked`)
+    if (total > 0) setRankMsg(`✓ ${total} jobs ranked`)
     loadJobs()
-    setTimeout(() => { setRanking(false); setRankProgress('') }, 3000)
+    setTimeout(() => { setRanking(false); setRankMsg('') }, 3000)
   }
 
-  async function handleRankSelected() {
-    if (!selected.size) return
-    setRanking(true)
-    setRankProgress(`Ranking ${selected.size} selected...`)
-    const res = await fetch('/api/jobs/rank-batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job_ids: Array.from(selected), limit: selected.size }),
-    })
-    const d = await res.json()
-    setRankProgress(`Done — ${d.ranked} ranked`)
-    setSelected(new Set())
-    loadJobs()
-    setTimeout(() => { setRanking(false); setRankProgress('') }, 2000)
-  }
-
-  async function handleDeleteJob(jobId: string) {
-    if (!confirm('Remove this job?')) return
-    await fetch('/api/jobs', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: jobId }),
-    })
+  async function handleDeleteJob(id: string) {
+    if (!confirm('Delete this job?')) return
+    await fetch('/api/jobs', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id}) })
     loadJobs()
   }
 
@@ -205,356 +327,442 @@ export default function JobsPage() {
     setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
   function toggleAll() {
-    if (selected.size === filtered.length) setSelected(new Set())
-    else setSelected(new Set(filtered.map(j => j.id)))
+    if (selected.size === visible.length) setSelected(new Set())
+    else setSelected(new Set(visible.map(j => j.id)))
   }
 
+  // ── Ordered column defs ───────────────────────────────────────────────────
+  const orderedCols = colOrder.map(k => ALL_COLS.find(c => c.key === k)!).filter(Boolean)
+
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="max-w-full">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-white">Jobs</h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unranked
           </p>
         </div>
-        <div className="flex gap-2 flex-wrap justify-end">
+
+        {/* Right-side actions */}
+        <div className="flex gap-2 flex-wrap items-center">
           {selected.size > 0 && (
             <>
-              <button onClick={handleRankSelected} disabled={ranking}
-                className="px-4 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg">
-                ⚡ Rank {selected.size} selected
-              </button>
-              <button onClick={() => alert(`Generate docs — coming in Phase 6`)}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg">
-                📄 Generate ({selected.size})
-              </button>
+              <span className="text-gray-500 text-xs">{selected.size} selected:</span>
+              <button onClick={() => bulkWorkflow('generated')} className="px-3 py-1.5 bg-blue-800 hover:bg-blue-700 text-white text-xs rounded-lg">📄 Generate</button>
+              <button onClick={() => bulkWorkflow('applied')}   className="px-3 py-1.5 bg-green-800 hover:bg-green-700 text-white text-xs rounded-lg">✓ Apply</button>
+              <button onClick={() => bulkWorkflow('discarded')} className="px-3 py-1.5 bg-red-900 hover:bg-red-800 text-white text-xs rounded-lg">✗ Discard</button>
+              <button onClick={() => bulkWorkflow('open')}      className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg">↺ Re-open</button>
             </>
           )}
           <button onClick={handleRankAll} disabled={ranking || counts.unranked === 0}
-            className="px-4 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg">
-            {ranking ? '⚙️ Ranking...' : `⚡ Rank All (${counts.unranked})`}
+            className="px-4 py-1.5 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white text-xs font-medium rounded-lg">
+            {ranking ? '⚙️ Ranking…' : `⚡ Rank All (${counts.unranked})`}
+          </button>
+          <button onClick={handleSaveLayout}
+            className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${layoutSaved ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
+            {layoutSaved ? '✓ Saved' : '💾 Save Layout'}
           </button>
         </div>
       </div>
 
-      {rankProgress && (
-        <div className="mb-4 p-3 bg-indigo-950 border border-indigo-800 rounded-lg text-indigo-300 text-sm">{rankProgress}</div>
+      {rankMsg && (
+        <div className="mb-3 p-2.5 bg-indigo-950 border border-indigo-800 rounded-lg text-indigo-300 text-xs">{rankMsg}</div>
       )}
 
-      {/* Filter tabs + sort */}
-      <div className="flex items-center justify-between mb-3 gap-2">
-        <div className="flex gap-1 flex-wrap">
+      {/* ── Filter bar ── */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {/* Priority filters */}
+        <div className="flex gap-1">
           {[
-            { key: 'all', label: `All (${counts.total})` },
-            { key: 'hot', label: `🔥 Hot (${counts.hot})` },
-            { key: 'good', label: `✅ Good (${counts.good})` },
-            { key: 'maybe', label: `🤔 Maybe (${counts.maybe})` },
-            { key: 'avoid', label: `❌ Avoid (${counts.avoid})` },
-            { key: 'unranked', label: `⏳ Unranked (${counts.unranked})` },
-          ].map(tab => (
-            <button key={tab.key} onClick={() => setFilter(tab.key)}
-              className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
-                filter === tab.key ? 'bg-indigo-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'
-              }`}>
-              {tab.label}
+            { k:'all',      l:`All (${counts.total})` },
+            { k:'hot',      l:`🔥 ${counts.hot}` },
+            { k:'good',     l:`✅ ${counts.good}` },
+            { k:'maybe',    l:`🤔 ${counts.maybe}` },
+            { k:'avoid',    l:`❌ ${counts.avoid}` },
+            { k:'unranked', l:`⏳ ${counts.unranked}` },
+          ].map(t => (
+            <button key={t.k} onClick={() => setPriFilter(t.k)}
+              className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors ${priFilter===t.k ? 'bg-indigo-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}>
+              {t.l}
             </button>
           ))}
         </div>
-        <select value={sortBy} onChange={e => setSortBy(e.target.value as 'score' | 'posted')}
-          className="px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-gray-300 text-xs focus:outline-none shrink-0">
-          <option value="score">Sort by Score</option>
-          <option value="posted">Sort by Date Posted</option>
-        </select>
+
+        <div className="w-px bg-gray-700" />
+
+        {/* Workflow status filters */}
+        <div className="flex gap-1">
+          {[
+            { k:'all',       l:`All` },
+            { k:'open',      l:`Open (${counts.open})` },
+            { k:'generated', l:`Generated (${counts.generated})` },
+            { k:'applied',   l:`Applied (${counts.applied})` },
+            { k:'discarded', l:`Discarded (${counts.discarded})` },
+          ].map(t => (
+            <button key={t.k} onClick={() => setWfFilter(t.k)}
+              className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors ${wfFilter===t.k ? 'bg-indigo-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}>
+              {t.l}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Table */}
+      {/* ── Table ── */}
       {loading ? (
-        <div className="text-gray-500 text-sm py-12 text-center">Loading jobs...</div>
-      ) : filtered.length === 0 ? (
+        <div className="text-gray-500 text-sm py-12 text-center">Loading jobs…</div>
+      ) : visible.length === 0 ? (
         <div className="text-gray-600 text-sm py-12 text-center">
           No jobs found. <a href="/imports" className="text-indigo-400">Import jobs →</a>
         </div>
       ) : (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
-          <table className="text-sm" style={{ minWidth: '1100px' }}>
+          <table className="text-xs border-collapse" style={{ tableLayout: 'fixed', width: colOrder.reduce((s,k) => s + (colWidths[k]??120), 48) + 'px' }}>
+            {/* col widths */}
+            <colgroup>
+              <col style={{ width: 40 }} />
+              {orderedCols.map(c => <col key={c.key} style={{ width: colWidths[c.key] ?? c.defaultWidth }} />)}
+              <col style={{ width: 36 }} />
+            </colgroup>
+
             <thead>
-              <tr className="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wider whitespace-nowrap">
-                <th className="px-3 py-3 w-8 sticky left-0 bg-gray-900 z-10">
-                  <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0}
+              {/* ── Column headers ── */}
+              <tr className="border-b border-gray-800 text-gray-400 uppercase tracking-wider">
+                <th className="px-2 py-2.5 sticky left-0 bg-gray-900 z-20 w-10">
+                  <input type="checkbox" checked={selected.size===visible.length && visible.length>0}
                     onChange={toggleAll} className="accent-indigo-500" />
                 </th>
-                <th className="px-3 py-3 text-left w-56 sticky left-8 bg-gray-900 z-10">Job Title</th>
-                <th className="px-3 py-3 text-left w-36">Employer</th>
-                <th className="px-3 py-3 text-left w-44">Location</th>
-                <th className="px-3 py-3 text-left w-48">Role Description</th>
-                <th className="px-3 py-3 text-left w-48">Ranking Comments</th>
-                <th className="px-3 py-3 text-center w-14">Score</th>
-                <th className="px-3 py-3 text-left w-24">Priority</th>
-                <th className="px-3 py-3 text-left w-36">Salary</th>
-                <th className="px-3 py-3 text-left w-24">Type</th>
-                <th className="px-3 py-3 text-left w-20">Arrangement</th>
-                <th className="px-3 py-3 text-right w-16">Applicants</th>
-                <th className="px-3 py-3 text-left w-16">Posted</th>
-                <th className="px-3 py-3 text-left w-14">Action</th>
-                <th className="px-3 py-3 w-8"></th>
+                {orderedCols.map((col, idx) => {
+                  const isSticky = col.sticky
+                  const stickyLeft = isSticky ? 40 : undefined
+                  const isSorted = sortKey === col.key
+                  return (
+                    <th key={col.key}
+                      className={`relative px-2 py-2.5 text-left select-none cursor-pointer ${isSticky ? 'sticky z-20 bg-gray-900' : ''} ${isSorted ? 'text-white' : ''}`}
+                      style={isSticky ? { left: stickyLeft } : {}}
+                      draggable
+                      onDragStart={() => onDragStart(col.key)}
+                      onDragOver={e => e.preventDefault()}
+                      onDrop={() => onDrop(col.key)}
+                      onDoubleClick={() => onHeaderDblClick(col.key, col)}
+                      title="Double-click to sort · Drag to reorder"
+                    >
+                      <span className="flex items-center gap-1">
+                        {col.label}
+                        {isSorted && <span className="text-indigo-400">{sortDir==='asc'?'↑':'↓'}</span>}
+                      </span>
+                      {/* Resize handle */}
+                      <div
+                        className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-indigo-500/40"
+                        onMouseDown={e => startResize(col.key, e)}
+                        onClick={e => e.stopPropagation()}
+                      />
+                    </th>
+                  )
+                })}
+                <th className="w-9 px-1" />
+              </tr>
+
+              {/* ── Filter row ── */}
+              <tr className="border-b border-gray-800 bg-gray-950">
+                <td />
+                {orderedCols.map(col => (
+                  <td key={col.key} className="px-1 py-1">
+                    {col.key === 'ai_score' ? (
+                      <input type="number" placeholder="min" value={scoreMin}
+                        onChange={e => setScoreMin(e.target.value)}
+                        className="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                    ) : col.filterable && col.filterType === 'text' ? (
+                      <input type="text" placeholder="filter…" value={colFilters[col.key] ?? ''}
+                        onChange={e => setColFilters(p => ({ ...p, [col.key]: e.target.value }))}
+                        className="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                    ) : col.filterable && col.filterType === 'select' ? (
+                      <select value={colFilters[col.key] ?? ''}
+                        onChange={e => setColFilters(p => ({ ...p, [col.key]: e.target.value }))}
+                        className="w-full bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white text-xs focus:outline-none focus:border-indigo-500">
+                        <option value="">All</option>
+                        {(col.key === 'work_type' ? workTypes : col.key === 'arrangement' ? arrangements : col.filterOptions ?? []).map(o => (
+                          <option key={o} value={o}>{o}</option>
+                        ))}
+                      </select>
+                    ) : null}
+                  </td>
+                ))}
+                <td />
               </tr>
             </thead>
+
             <tbody className="divide-y divide-gray-800/60">
-              {filtered.map(job => {
-                const rp = job.raw_payload || {}
-                const arrangement = rp.workArrangements || '—'
-                const applicants = rp.numApplicants ?? null
+              {visible.map(job => {
+                const rp  = job.raw_payload ?? {}
+                const wf  = wfOf(job.status)
+                const sel = selected.has(job.id)
+                const exp = expanded === job.id
+
+                function cell(content: React.ReactNode, extraClass = '') {
+                  return <td className={`px-2 py-2 text-white overflow-hidden ${extraClass}`}>{content}</td>
+                }
+
+                function trunc(text: string | null | undefined, max = 999) {
+                  if (!text) return <span className="text-gray-600">—</span>
+                  return <span className="block truncate" title={text}>{text}</span>
+                }
+
+                const rowBg = sel ? 'bg-indigo-950/40' : 'hover:bg-gray-800/40'
+
                 return (
                   <>
-                    <tr key={job.id}
-                      className={`group transition-colors ${selected.has(job.id) ? 'bg-indigo-950/30' : 'hover:bg-gray-800/50'}`}>
-                      <td className={`px-3 py-2.5 text-center sticky left-0 z-20 ${selected.has(job.id) ? 'bg-indigo-950' : 'bg-gray-900 group-hover:bg-gray-800'}`}>
-                        <input type="checkbox" checked={selected.has(job.id)}
-                          onChange={() => toggleSelect(job.id)} className="accent-indigo-500" />
+                    <tr key={job.id} className={`group transition-colors ${rowBg}`}>
+                      {/* Checkbox */}
+                      <td className={`px-2 py-2 text-center sticky left-0 z-10 ${sel ? 'bg-indigo-950' : 'bg-gray-900 group-hover:bg-gray-800'}`}>
+                        <input type="checkbox" checked={sel} onChange={() => toggleSelect(job.id)} className="accent-indigo-500" />
                       </td>
 
-                      {/* Title — sticky, no wrap, truncate */}
-                      <td className={`px-3 py-2.5 w-56 sticky left-8 z-20 ${selected.has(job.id) ? 'bg-indigo-950' : 'bg-gray-900 group-hover:bg-gray-800'}`}>
-                        <a href={job.url} target="_blank" rel="noopener noreferrer"
-                          className="text-white font-medium hover:text-indigo-300 transition-colors block truncate max-w-[210px]"
-                          title={job.title}>
-                          {job.title || '(no title)'}
-                        </a>
-                        {job.ai_ranking?.reason && (
-                          <p className="text-gray-500 text-xs mt-0.5 truncate max-w-[210px] italic" title={job.ai_ranking.reason}>
-                            {job.ai_ranking.reason}
-                          </p>
-                        )}
-                      </td>
+                      {orderedCols.map(col => {
+                        const isSticky = col.sticky
+                        const stickyCls = isSticky ? `sticky z-10 ${sel ? 'bg-indigo-950' : 'bg-gray-900 group-hover:bg-gray-800'}` : ''
 
-                      <Cell className="text-gray-300">
-                        <span className="block truncate max-w-[132px]" title={job.employer}>{job.employer || '—'}</span>
-                      </Cell>
+                        switch (col.key) {
+                          case 'source_job_id':
+                            return <td key={col.key} className={`px-2 py-2 text-white overflow-hidden ${stickyCls}`} style={isSticky ? { left: 40 } : {}}>
+                              <a href={job.url} target="_blank" rel="noopener noreferrer" className="text-indigo-300 hover:text-indigo-100 font-mono truncate block" title={job.source_job_id}>
+                                {job.source_job_id || '—'}
+                              </a>
+                            </td>
 
-                      <Cell className="text-gray-400">
-                        <span className="block truncate max-w-[168px]" title={job.location}>{job.location || '—'}</span>
-                      </Cell>
+                          case 'title':
+                            return <td key={col.key} className={`px-2 py-2 overflow-hidden ${stickyCls}`} style={isSticky ? { left: 40 } : {}}>
+                              <a href={job.url} target="_blank" rel="noopener noreferrer"
+                                className="text-white font-medium hover:text-indigo-300 transition-colors block truncate"
+                                title={job.title}>{job.title || '(no title)'}</a>
+                              {job.ai_ranking?.reason && (
+                                <p className="text-gray-500 text-xs mt-0.5 truncate italic" title={job.ai_ranking.reason}>{job.ai_ranking.reason}</p>
+                              )}
+                            </td>
 
-                      {/* Role Description */}
-                      <Cell className="text-gray-400 max-w-[180px]">
-                        {job.ai_ranking?.role_description?.length ? (
-                          <span
-                            className="block truncate"
-                            title={job.ai_ranking.role_description.join('\n')}
-                          >
-                            {job.ai_ranking.role_description[0]}
-                          </span>
-                        ) : <span className="text-gray-700">—</span>}
-                      </Cell>
+                          case 'employer':
+                            return cell(trunc(job.employer), stickyCls)
 
-                      {/* Ranking Comments */}
-                      <Cell className="text-gray-400 max-w-[180px]">
-                        {job.ai_ranking?.ranking_comments?.length ? (
-                          <span
-                            className="block truncate"
-                            title={job.ai_ranking.ranking_comments.join('\n')}
-                          >
-                            {job.ai_ranking.ranking_comments[0]}
-                          </span>
-                        ) : <span className="text-gray-700">—</span>}
-                      </Cell>
+                          case 'location':
+                            return cell(trunc(job.location), stickyCls)
 
-                      <Cell className="text-center"><ScoreBadge score={job.ai_score} /></Cell>
+                          case 'role_description':
+                            return <td key={col.key} className="px-2 py-2 text-white overflow-hidden">
+                              {job.ai_ranking?.role_description?.length
+                                ? <span className="block truncate" title={job.ai_ranking.role_description.join('\n')}>{job.ai_ranking.role_description[0]}</span>
+                                : <span className="text-gray-600">—</span>}
+                            </td>
 
-                      <Cell>
-                        {job.ai_priority ? (
-                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${PRIORITY_STYLES[job.ai_priority]}`}>
-                            {PRIORITY_LABELS[job.ai_priority]}
-                          </span>
-                        ) : <span className="text-gray-600">Unranked</span>}
-                      </Cell>
+                          case 'ranking_comments':
+                            return <td key={col.key} className="px-2 py-2 text-white overflow-hidden">
+                              {job.ai_ranking?.ranking_comments?.length
+                                ? <span className="block truncate" title={job.ai_ranking.ranking_comments.join('\n')}>{job.ai_ranking.ranking_comments[0]}</span>
+                                : <span className="text-gray-600">—</span>}
+                            </td>
 
-                      <Cell className="text-gray-400">
-                        <span className="block truncate max-w-[132px]" title={job.salary_text || undefined}>
-                          {job.salary_text || 'N/A'}
-                        </span>
-                      </Cell>
+                          case 'ai_score':
+                            return <td key={col.key} className="px-2 py-2 text-center">
+                              {job.ai_score != null
+                                ? <span className={`text-sm font-bold ${job.ai_score>=70?'text-green-400':job.ai_score>=50?'text-yellow-400':'text-red-400'}`}>{job.ai_score}</span>
+                                : <span className="text-gray-700">—</span>}
+                            </td>
 
-                      <Cell className="text-gray-400">{job.work_type || '—'}</Cell>
-                      <Cell className="text-gray-400">{arrangement}</Cell>
-                      <Cell className="text-gray-400 text-right">
-                        {applicants != null ? applicants.toLocaleString() : '—'}
-                      </Cell>
-                      <Cell className="text-gray-500">{relativeDate(job.posted_at)}</Cell>
+                          case 'ai_priority':
+                            return <td key={col.key} className="px-2 py-2">
+                              {job.ai_priority
+                                ? <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${PRI_STYLE[job.ai_priority]}`}>{PRI_LABEL[job.ai_priority]}</span>
+                                : <span className="text-gray-600">—</span>}
+                            </td>
 
-                      <Cell>
-                        {job.ai_ranking?.recommended_action ? (
-                          <span className={`font-medium ${
-                            job.ai_ranking.recommended_action === 'apply' ? 'text-green-400' :
-                            job.ai_ranking.recommended_action === 'review_carefully' ? 'text-yellow-400' : 'text-gray-500'
-                          }`}>
-                            {job.ai_ranking.recommended_action === 'apply' ? '✓ Apply' :
-                             job.ai_ranking.recommended_action === 'review_carefully' ? '👀 Review' : '↩ Skip'}
-                          </span>
-                        ) : null}
-                      </Cell>
+                          case 'workflow_status':
+                            return <td key={col.key} className="px-2 py-2">
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${WF_STYLE[wf]}`}>{WF_LABEL[wf]}</span>
+                            </td>
 
-                      <td className="px-2 py-2.5">
-                        <button onClick={() => setExpanded(expanded === job.id ? null : job.id)}
-                          className="text-gray-500 hover:text-gray-300 text-xs whitespace-nowrap">
-                          {expanded === job.id ? '▲' : '▼'}
+                          case 'salary_text':
+                            return cell(trunc(job.salary_text))
+
+                          case 'work_type':
+                            return cell(<span className="text-white">{job.work_type || '—'}</span>)
+
+                          case 'arrangement':
+                            return cell(<span className="text-white">{String(rp.workArrangements || '—')}</span>)
+
+                          case 'applicants':
+                            return <td key={col.key} className="px-2 py-2 text-white text-right">
+                              {rp.numApplicants != null ? rp.numApplicants.toLocaleString() : '—'}
+                            </td>
+
+                          case 'posted_at':
+                            return <td key={col.key} className="px-2 py-2 text-white">{relDate(job.posted_at)}</td>
+
+                          case 'actions':
+                            return <td key={col.key} className="px-2 py-2">
+                              <div className="flex gap-1 flex-wrap">
+                                {wf !== 'generated' && (
+                                  <button onClick={() => setWorkflow(job.id, 'generated')}
+                                    className="px-1.5 py-0.5 bg-blue-900 hover:bg-blue-800 text-blue-200 text-xs rounded">📄 Gen</button>
+                                )}
+                                {wf !== 'applied' && (
+                                  <button onClick={() => setWorkflow(job.id, 'applied', job.url)}
+                                    className="px-1.5 py-0.5 bg-green-900 hover:bg-green-800 text-green-200 text-xs rounded">✓ Apply</button>
+                                )}
+                                {wf !== 'discarded' && (
+                                  <button onClick={() => setWorkflow(job.id, 'discarded')}
+                                    className="px-1.5 py-0.5 bg-red-950 hover:bg-red-900 text-red-400 text-xs rounded">✗ Discard</button>
+                                )}
+                                {wf !== 'open' && (
+                                  <button onClick={() => setWorkflow(job.id, 'open')}
+                                    className="px-1.5 py-0.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded">↺ Open</button>
+                                )}
+                              </div>
+                            </td>
+
+                          default:
+                            return <td key={col.key} className="px-2 py-2 text-gray-600">—</td>
+                        }
+                      })}
+
+                      {/* Expand toggle */}
+                      <td className="px-1 py-2 text-center">
+                        <button onClick={() => setExpanded(exp ? null : job.id)}
+                          className="text-gray-500 hover:text-gray-300 text-xs w-6 h-6 flex items-center justify-center rounded hover:bg-gray-700">
+                          {exp ? '▲' : '▼'}
                         </button>
                       </td>
                     </tr>
 
-                    {/* Expanded detail row */}
-                    {expanded === job.id && (
+                    {/* ── Expanded row ── */}
+                    {exp && (
                       <tr key={`${job.id}-exp`}>
-                        <td colSpan={15} className="bg-gray-950 border-t border-b border-gray-800 px-6 py-5">
-
-                          {/* Top 3 panels */}
+                        <td colSpan={orderedCols.length + 2} className="bg-gray-950 border-t border-b border-gray-800 px-6 py-5">
                           <div className="grid grid-cols-3 gap-6 mb-5">
 
-                            {/* Panel 1: AI Analysis */}
+                            {/* AI Analysis */}
                             <div className="space-y-2.5">
                               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800 pb-1">AI Analysis</p>
                               {job.ai_ranking ? (
                                 <>
-                                  {job.ai_ranking.key_skills && (
-                                    <div><p className="text-xs text-gray-500">Key Skills</p><p className="text-sm text-green-300">{job.ai_ranking.key_skills}</p></div>
-                                  )}
-                                  {job.ai_ranking.red_flags && (
-                                    <div><p className="text-xs text-gray-500">Red Flags</p><p className="text-sm text-red-300">{job.ai_ranking.red_flags}</p></div>
-                                  )}
-                                  {job.ai_ranking.tailoring_notes && (
-                                    <div><p className="text-xs text-gray-500">Tailoring Tips</p><p className="text-sm text-blue-300">{job.ai_ranking.tailoring_notes}</p></div>
-                                  )}
                                   {job.ai_ranking.role_description?.length && (
-                                    <div>
-                                      <p className="text-xs text-gray-500 mb-1">Role Description</p>
-                                      <ul className="space-y-0.5">
-                                        {job.ai_ranking.role_description.map((b, i) => (
-                                          <li key={i} className="text-sm text-cyan-300">• {b}</li>
-                                        ))}
-                                      </ul>
+                                    <div><p className="text-xs text-gray-500 mb-1">Role Description</p>
+                                      <ul className="space-y-0.5">{job.ai_ranking.role_description.map((b,i) => <li key={i} className="text-sm text-cyan-300">• {b}</li>)}</ul>
                                     </div>
                                   )}
                                   {job.ai_ranking.ranking_comments?.length && (
-                                    <div>
-                                      <p className="text-xs text-gray-500 mb-1">Why this score</p>
-                                      <ul className="space-y-0.5">
-                                        {job.ai_ranking.ranking_comments.map((b, i) => (
-                                          <li key={i} className="text-sm text-amber-300">• {b}</li>
-                                        ))}
-                                      </ul>
+                                    <div><p className="text-xs text-gray-500 mb-1">Why this score</p>
+                                      <ul className="space-y-0.5">{job.ai_ranking.ranking_comments.map((b,i) => <li key={i} className="text-sm text-amber-300">• {b}</li>)}</ul>
                                     </div>
                                   )}
-                                  {job.ai_ranking.reason && (
-                                    <div><p className="text-xs text-gray-500">Ranking Reason</p><p className="text-sm text-gray-300">{job.ai_ranking.reason}</p></div>
-                                  )}
+                                  {job.ai_ranking.key_skills && <div><p className="text-xs text-gray-500">Key Skills</p><p className="text-sm text-green-300">{job.ai_ranking.key_skills}</p></div>}
+                                  {job.ai_ranking.red_flags && <div><p className="text-xs text-gray-500">Red Flags</p><p className="text-sm text-red-300">{job.ai_ranking.red_flags}</p></div>}
+                                  {job.ai_ranking.tailoring_notes && <div><p className="text-xs text-gray-500">Tailoring Tips</p><p className="text-sm text-blue-300">{job.ai_ranking.tailoring_notes}</p></div>}
                                   <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs pt-1 border-t border-gray-800">
-                                    {[
+                                    {([
                                       ['Beginner Friendly', job.ai_ranking.beginner_friendly],
-                                      ['GTO/Traineeship', job.ai_ranking.gto_traineeship],
-                                      ['Training Offered', job.ai_ranking.training_offered],
-                                      ['Cert III Pathway', job.ai_ranking.cert3_pathway],
+                                      ['GTO/Traineeship',   job.ai_ranking.gto_traineeship],
+                                      ['Training Offered',  job.ai_ranking.training_offered],
+                                      ['Cert III Pathway',  job.ai_ranking.cert3_pathway],
                                       ['Prior School Req.', job.ai_ranking.prior_school_required],
-                                      ['Qual. Risk', job.ai_ranking.qualification_risk],
-                                      ['Exp. Risk', job.ai_ranking.experience_risk],
-                                      ['Resume Version', job.ai_ranking.resume_version?.replace(/_/g, ' ')],
-                                      ['Cover Letter', job.ai_ranking.cover_letter_needed],
-                                    ].filter(([, v]) => v).map(([label, val]) => (
-                                      <div key={label as string}>
-                                        <span className="text-gray-500">{label}: </span>
-                                        <span className="text-gray-200 capitalize">{val}</span>
-                                      </div>
+                                      ['Qual. Risk',        job.ai_ranking.qualification_risk],
+                                      ['Exp. Risk',         job.ai_ranking.experience_risk],
+                                      ['Resume Version',    job.ai_ranking.resume_version?.replace(/_/g,' ')],
+                                      ['Cover Letter',      job.ai_ranking.cover_letter_needed],
+                                    ] as [string,string|undefined][]).filter(([,v])=>v).map(([l,v]) => (
+                                      <div key={l}><span className="text-gray-500">{l}: </span><span className="text-white capitalize">{v}</span></div>
                                     ))}
                                   </div>
                                 </>
-                              ) : (
-                                <p className="text-gray-600 text-xs italic">Not yet ranked — click ⚡ Rank All above</p>
-                              )}
+                              ) : <p className="text-gray-600 text-xs italic">Not yet ranked</p>}
                             </div>
 
-                            {/* Panel 2: All Job Details from Apify */}
+                            {/* Job Details */}
                             <div className="space-y-2">
                               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800 pb-1">Job Details</p>
                               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-                                {[
-                                  ['Employer', job.employer],
-                                  ['Category', rp.classificationInfo?.classification],
+                                {([
+                                  ['Job ID',       job.source_job_id],
+                                  ['Employer',     job.employer],
+                                  ['Category',     rp.classificationInfo?.classification],
                                   ['Sub-Category', rp.classificationInfo?.subClassification],
-                                  ['Area', rp.joblocationInfo?.area],
-                                  ['Suburb', rp.joblocationInfo?.suburb],
-                                  ['Location', rp.joblocationInfo?.displayLocation || job.location],
-                                  ['Work Type', rp.workTypes || job.work_type],
-                                  ['Arrangement', rp.workArrangements],
-                                  ['Salary', rp.salary || job.salary_text],
-                                  ['Applicants', rp.numApplicants?.toString()],
-                                  ['Resume %', rp.resumePercentage != null ? `${rp.resumePercentage}%` : undefined],
-                                  ['Cover Letter %', rp.coverLetterPercentage != null ? `${rp.coverLetterPercentage}%` : undefined],
-                                  ['Posted', job.posted_at ? new Date(job.posted_at).toLocaleDateString('en-AU') : undefined],
-                                  ['Expires', rp.expiresAtUtc ? new Date(rp.expiresAtUtc).toLocaleDateString('en-AU') : undefined],
-                                  ['External Apply', rp.isExternalApply ? 'Yes' : rp.isExternalApply === false ? 'No' : undefined],
-                                  ['Verified', rp.isVerified ? '✓ Yes' : rp.isVerified === false ? 'No' : undefined],
-                                  ['Source', job.source],
-                                ].filter(([, v]) => v != null && v !== '').map(([label, val]) => (
-                                  <div key={label as string}>
-                                    <span className="text-gray-500">{label}: </span>
-                                    <span className="text-gray-200">{val}</span>
-                                  </div>
+                                  ['Area',         rp.joblocationInfo?.area],
+                                  ['Suburb',       rp.joblocationInfo?.suburb],
+                                  ['Location',     rp.joblocationInfo?.displayLocation || job.location],
+                                  ['Work Type',    rp.workTypes as string || job.work_type],
+                                  ['Arrangement',  rp.workArrangements as string],
+                                  ['Salary',       rp.salary as string || job.salary_text],
+                                  ['Applicants',   rp.numApplicants?.toString()],
+                                  ['Resume %',     rp.resumePercentage != null ? `${rp.resumePercentage}%` : undefined],
+                                  ['Cover Letter %',rp.coverLetterPercentage != null ? `${rp.coverLetterPercentage}%` : undefined],
+                                  ['Posted',       job.posted_at ? new Date(job.posted_at).toLocaleDateString('en-AU') : undefined],
+                                  ['Expires',      rp.expiresAtUtc ? new Date(rp.expiresAtUtc).toLocaleDateString('en-AU') : undefined],
+                                  ['External Apply',rp.isExternalApply === true ? 'Yes' : rp.isExternalApply === false ? 'No' : undefined],
+                                  ['Verified',     rp.isVerified === true ? '✓ Yes' : rp.isVerified === false ? 'No' : undefined],
+                                  ['Workflow',     WF_LABEL[wf]],
+                                ] as [string,string|undefined][]).filter(([,v])=>v!=null&&v!=='').map(([l,v]) => (
+                                  <div key={l}><span className="text-gray-500">{l}: </span><span className="text-white">{v}</span></div>
                                 ))}
                               </div>
-                              {/* Employer Questions */}
                               {Array.isArray(rp.employerQuestions) && rp.employerQuestions.length > 0 && (
                                 <div className="pt-2 border-t border-gray-800">
-                                  <p className="text-xs text-gray-500 mb-1">Employer Questions ({rp.employerQuestions.length})</p>
-                                  <ul className="space-y-0.5">
-                                    {rp.employerQuestions.map((q, i) => (
-                                      <li key={i} className="text-xs text-yellow-300">• {q}</li>
-                                    ))}
-                                  </ul>
+                                  <p className="text-xs text-gray-500 mb-1">Employer Questions</p>
+                                  <ul className="space-y-0.5">{rp.employerQuestions.map((q,i) => <li key={i} className="text-xs text-yellow-300">• {q}</li>)}</ul>
                                 </div>
                               )}
                             </div>
 
-                            {/* Panel 3: Links + Actions */}
+                            {/* Links & Actions */}
                             <div className="space-y-2">
                               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800 pb-1">Links & Actions</p>
-                              <div className="space-y-2">
-                                {(rp.jobLink || job.url) && (
-                                  <a href={(rp.jobLink || job.url) as string} target="_blank" rel="noopener noreferrer"
-                                    className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs text-gray-300 transition-colors">
-                                    🔗 View on {job.source === 'seek' ? 'Seek' : 'Indeed'}
+                              <div className="space-y-1.5">
+                                {(rp.jobLink as string || job.url) && (
+                                  <a href={(rp.jobLink as string || job.url)} target="_blank" rel="noopener noreferrer"
+                                    className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs text-white">
+                                    🔗 View on Seek
                                   </a>
                                 )}
                                 {rp.applyLink && rp.applyLink !== rp.jobLink && (
                                   <a href={rp.applyLink as string} target="_blank" rel="noopener noreferrer"
-                                    className="flex items-center gap-2 px-3 py-2 bg-indigo-900 hover:bg-indigo-800 rounded-lg text-xs text-indigo-300 transition-colors">
+                                    className="flex items-center gap-2 px-3 py-2 bg-indigo-900 hover:bg-indigo-800 rounded-lg text-xs text-white">
                                     ✉️ Apply directly
                                   </a>
                                 )}
-                                <button onClick={() => alert('Generate Resume + Cover Letter — coming in Phase 6')}
-                                  className="w-full px-3 py-2 bg-green-900/50 hover:bg-green-900 rounded-lg text-xs text-green-300 transition-colors text-left">
-                                  📄 Generate Resume + Cover Letter
-                                </button>
-                                <button onClick={() => handleDeleteJob(job.id)}
-                                  className="w-full px-3 py-2 bg-red-950 hover:bg-red-900 rounded-lg text-xs text-red-400 transition-colors text-left">
-                                  🗑 Remove job
-                                </button>
+                                <div className="flex flex-wrap gap-1.5 pt-1">
+                                  {wf !== 'generated' && <button onClick={() => setWorkflow(job.id,'generated')} className="px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white text-xs rounded-lg">📄 Generate</button>}
+                                  {wf !== 'applied'   && <button onClick={() => setWorkflow(job.id,'applied',job.url)} className="px-3 py-1.5 bg-green-900 hover:bg-green-800 text-white text-xs rounded-lg">✓ Apply</button>}
+                                  {wf !== 'discarded' && <button onClick={() => setWorkflow(job.id,'discarded')} className="px-3 py-1.5 bg-red-950 hover:bg-red-900 text-red-300 text-xs rounded-lg">✗ Discard</button>}
+                                  {wf !== 'open'      && <button onClick={() => setWorkflow(job.id,'open')} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg">↺ Re-open</button>}
+                                  <button onClick={() => handleDeleteJob(job.id)} className="px-3 py-1.5 bg-gray-900 hover:bg-red-950 text-red-400 text-xs rounded-lg">🗑 Delete</button>
+                                </div>
                               </div>
                             </div>
                           </div>
 
-                          {/* Full-width Job Description */}
-                          {job.description_text && (
+                          {/* Job description */}
+                          {(rp.content?.jobHook || rp.content?.bulletPoints?.length || job.description_html || job.description_text) && (
                             <div className="border-t border-gray-800 pt-4">
                               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Job Description</p>
-                              <div className="bg-gray-900 rounded-lg p-4 max-h-64 overflow-y-auto">
-                                <p className="text-gray-300 text-sm whitespace-pre-line leading-relaxed">
-                                  {job.description_text}
-                                </p>
-                              </div>
+                              {rp.content?.jobHook && (
+                                <p className="text-sm text-cyan-300 italic mb-3">"{rp.content.jobHook}"</p>
+                              )}
+                              {rp.content?.bulletPoints?.length && (
+                                <ul className="mb-3 space-y-1">
+                                  {rp.content.bulletPoints.map((b,i) => <li key={i} className="text-sm text-white">• {b}</li>)}
+                                </ul>
+                              )}
+                              {(job.description_html || job.description_text) && (
+                                <div className="bg-gray-900 rounded-lg p-4 max-h-72 overflow-y-auto">
+                                  {job.description_html
+                                    ? <div className="text-white text-sm leading-relaxed prose prose-invert prose-sm max-w-none"
+                                        dangerouslySetInnerHTML={{ __html: job.description_html }} />
+                                    : <p className="text-white text-sm whitespace-pre-line leading-relaxed">{job.description_text}</p>
+                                  }
+                                </div>
+                              )}
                             </div>
                           )}
-
                         </td>
                       </tr>
                     )}

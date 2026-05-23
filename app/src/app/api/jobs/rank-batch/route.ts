@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { getAuth } from '@/lib/supabase/get-auth'
 import OpenAI from 'openai'
 
 const DEFAULT_RANKING_PROMPT = `You are ranking job listings for Priyadharshini Selvam to identify the best opportunities in Melbourne, Australia.
@@ -51,8 +51,7 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 }`
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { supabase, user } = await getAuth()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()

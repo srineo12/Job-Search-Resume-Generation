@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { getAuth } from '@/lib/supabase/get-auth'
 import { normalizeSeekJobs } from '@/lib/import/normalisers/seek'
 import { normalizeIndeedJobs } from '@/lib/import/normalisers/indeed'
 import { NormalizedJob } from '@/lib/import/normalisers/base'
@@ -10,8 +10,7 @@ export async function GET(
 ) {
   const { id: importId } = await params
   
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { supabase, user } = await getAuth()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Get import record

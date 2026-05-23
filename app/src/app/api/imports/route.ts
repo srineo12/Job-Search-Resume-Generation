@@ -1,33 +1,62 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { getAuth } from '@/lib/supabase/get-auth'
 
-/** Build a seek.com.au search URL from keywords + filters.
+/**
+ * Build Seek actor input using native actor fields (NOT a URL).
  *
- * Uses the path-based location format (/in-All-Melbourne-VIC) which is more
- * reliable than the ?where= query param.  Keywords are space-joined (no OR/quotes)
- * so Seek's own relevance engine handles matching — the native actor
- * `includeOneInTitle` filter then narrows results to relevant job titles.
+ * The websift/seek-job-scraper actor accepts:
+ *   searchTerm      – keyword string with OR operators / quoted phrases
+ *   location        – "Melbourne VIC"
+ *   radius          – km (number)
+ *   dateRange       – days (number, e.g. 30)
+ *   sortBy          – "KeywordRelevance"
+ *   maxResults      – max jobs to return
+ *   includeOneInTitle – string[] of terms; actor only keeps jobs whose title
+ *                       contains at least one term (case-insensitive)
+ *   country         – "australia"
+ *
+ * URL-based input was tried and abandoned — the actor ignored ?where= query
+ * params and returned irrelevant Finance/Admin jobs instead of Teaching roles.
  */
-function buildSeekUrl(keywords: string[], date_range: string): string {
-  const keywordQuery = keywords
+function buildSeekInput(
+  keywords: string[],
+  date_range: string,
+  maxResults: number,
+  includeOneInTitle: string[]
+): Record<string, unknown> {
+  // Quote multi-word phrases so Seek's engine treats them as phrases, join with OR
+  const searchTerm = keywords
     .map(k => k.trim())
     .filter(Boolean)
-    .join(' ')   // plain space-join; Seek handles relevance internally
+    .map(k => (k.includes(' ') ? `"${k}"` : k))
+    .join(' OR ')
 
-  const params = new URLSearchParams()
-  params.set('keywords', keywordQuery)
-  if (date_range) {
-    const days = date_range.replace('d', '')
-    params.set('daterange', days)
+  const input: Record<string, unknown> = {
+    searchTerm,
+    location: 'Melbourne VIC',
+    radius: 50,
+    sortBy: 'KeywordRelevance',
+    maxResults,
+    country: 'australia',
   }
-  // Path-based location (more reliable than ?where= query param)
-  return `https://www.seek.com.au/jobs/in-All-Melbourne-VIC?${params.toString()}`
+
+  if (date_range) {
+    const days = parseInt(date_range.replace('d', ''), 10)
+    if (!isNaN(days)) input.dateRange = days
+  }
+
+  if (includeOneInTitle.length > 0) {
+    // Actor requires an array (not a comma-separated string)
+    input.includeOneInTitle = includeOneInTitle
+  }
+
+  return input
 }
 
-/** Build an indeed.com.au search URL */
+/** Build an indeed.com.au search URL (URL-based, actor handles it differently) */
 function buildIndeedUrl(keywords: string[], date_range: string): string {
   const params = new URLSearchParams()
-  params.set('q', keywords.join(' '))
+  params.set('q', keywords.join(' OR '))
   params.set('l', 'Melbourne VIC')
   params.set('radius', '50')
   if (date_range) {
@@ -39,8 +68,7 @@ function buildIndeedUrl(keywords: string[], date_range: string): string {
 }
 
 export async function GET() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { supabase, user } = await getAuth()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { data, error } = await supabase
@@ -54,8 +82,7 @@ export async function GET() {
 }
 
 export async function DELETE(request: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { supabase, user } = await getAuth()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await request.json()
@@ -65,8 +92,7 @@ export async function DELETE(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { supabase, user } = await getAuth()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
@@ -83,7 +109,7 @@ export async function POST(request: NextRequest) {
   if (!actor?.actor_id?.trim())
     return NextResponse.json({ error: `Apify actor not configured for ${source}. Go to Settings → Apify Actors.` }, { status: 400 })
 
-  // Load keyword sets (search type only)
+  // Load keyword sets
   const { data: keywordSets } = await supabase
     .from('keyword_sets').select('keywords').eq('user_id', user.id).in('id', keyword_set_ids)
   const allKeywords = (keywordSets || []).flatMap(s => s.keywords || [])
@@ -92,25 +118,19 @@ export async function POST(request: NextRequest) {
 
   const maxItemsCapped = Math.min(Math.max(1, max_items), 500)
 
-  // Build the search URL for the actor
-  const searchUrl = source === 'seek'
-    ? buildSeekUrl(allKeywords, date_range)
-    : buildIndeedUrl(allKeywords, date_range)
-
-  // Build Apify input.
-  // websift/seek-job-scraper's actual controlling field is 'maxResults' (confirmed from
-  // exported run JSON — actor ignores 'maxItems' and 'maximumResults').
-  // includeOneInTitle is a native actor field — it tells the actor to only keep results
-  // where at least one of the comma-separated terms appears in the job title.
-  const apifyInput: Record<string, unknown> = {
-    url: searchUrl,
-    maxResults: maxItemsCapped,   // ← actual field the actor respects
-    ...(include_in_title.length > 0
-      ? { includeOneInTitle: include_in_title.join(', ') }
-      : {}),
+  // Build Apify input — native fields for Seek, URL for Indeed
+  let apifyInput: Record<string, unknown>
+  if (source === 'seek') {
+    apifyInput = buildSeekInput(allKeywords, date_range, maxItemsCapped, include_in_title)
+  } else {
+    apifyInput = {
+      url: buildIndeedUrl(allKeywords, date_range),
+      maxResults: maxItemsCapped,
+      ...(include_in_title.length > 0 ? { includeOneInTitle: include_in_title } : {}),
+    }
   }
 
-  // Apify URLs use '~' instead of '/' in actor IDs
+  // Apify actor IDs use '~' instead of '/'
   const actorIdForUrl = actor.actor_id.replace('/', '~')
   let apifyRunId: string
   try {
@@ -136,7 +156,9 @@ export async function POST(request: NextRequest) {
     .from('imports')
     .insert({
       user_id: user.id, source, actor_id: actor.actor_id,
-      keyword_set_ids, input_payload: { ...apifyInput, include_in_title },
+      keyword_set_ids,
+      // Store actual Apify input + title terms for display in UI
+      input_payload: { ...apifyInput, include_in_title },
       apify_run_id: apifyRunId, status: 'queued',
     })
     .select().single()

@@ -303,20 +303,49 @@ export default function JobsPage() {
   // ── Rank all ──────────────────────────────────────────────────────────────
   async function handleRankAll(force = false) {
     setRanking(true); let total = 0
-    while (true) {
-      setRankMsg(`Ranking… ${total} done`)
-      const res = await fetch('/api/jobs/rank-batch', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({limit:20, force}) })
-      const d = await res.json()
-      total += d.ranked || 0
-      if (!d.ranked || d.remaining === 0) {
-        if (d.errors > 0) setRankMsg(`⚠️ ${d.message}`)
-        break
+
+    if (force) {
+      // Re-rank: send jobs in batches of 3 so each API call finishes quickly
+      // and progress updates are visible
+      const allIds = jobs.map(j => j.id)
+      const BATCH = 3
+      for (let i = 0; i < allIds.length; i += BATCH) {
+        const batch = allIds.slice(i, i + BATCH)
+        setRankMsg(`Re-ranking… ${i}/${allIds.length}`)
+        const res = await fetch('/api/jobs/rank-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ job_ids: batch, force: true }),
+        })
+        const d = await res.json()
+        total += d.ranked || 0
+        if (d.errors > 0) {
+          setRankMsg(`⚠️ ${d.message}`)
+          await new Promise(r => setTimeout(r, 2000))
+        }
       }
-      setRankMsg(`Ranked ${total}… ${d.remaining} remaining`)
+      setRankMsg(`✓ Re-ranked ${total}/${allIds.length} jobs`)
+    } else {
+      while (true) {
+        setRankMsg(`Ranking… ${total} done`)
+        const res = await fetch('/api/jobs/rank-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 5 }),
+        })
+        const d = await res.json()
+        total += d.ranked || 0
+        if (!d.ranked || d.remaining === 0) {
+          if (d.errors > 0) setRankMsg(`⚠️ ${d.message}`)
+          break
+        }
+        setRankMsg(`Ranked ${total}… ${d.remaining} remaining`)
+      }
+      if (total > 0) setRankMsg(`✓ ${total} jobs ranked`)
     }
-    if (total > 0) setRankMsg(`✓ ${total} jobs ranked`)
+
     loadJobs()
-    setTimeout(() => { setRanking(false); setRankMsg('') }, 3000)
+    setTimeout(() => { setRanking(false); setRankMsg('') }, 4000)
   }
 
   async function handleDeleteJob(id: string) {

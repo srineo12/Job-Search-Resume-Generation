@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
     .select(`
       id, title, employer, location, work_type, salary_text,
       posted_at, url, status, source, raw_payload,
+      description_text, description_html,
       ai_score, ai_priority, ai_ranking, ai_ranked_at,
       created_at, import_id
     `)

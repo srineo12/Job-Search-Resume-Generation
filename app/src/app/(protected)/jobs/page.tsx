@@ -32,6 +32,8 @@ interface Job {
     tailoring_notes?: string
   } | null
   ai_ranked_at: string | null
+  description_text: string | null
+  description_html: string | null
   // raw_payload for all Apify fields
   raw_payload: {
     numApplicants?: number
@@ -285,14 +287,14 @@ export default function JobsPage() {
                 return (
                   <>
                     <tr key={job.id}
-                      className={`hover:bg-gray-800/40 transition-colors ${selected.has(job.id) ? 'bg-indigo-950/20' : ''}`}>
-                      <td className="px-3 py-2.5 text-center sticky left-0 bg-inherit z-10">
+                      className={`group transition-colors ${selected.has(job.id) ? 'bg-indigo-950/30' : 'hover:bg-gray-800/50'}`}>
+                      <td className={`px-3 py-2.5 text-center sticky left-0 z-20 ${selected.has(job.id) ? 'bg-indigo-950' : 'bg-gray-900 group-hover:bg-gray-800'}`}>
                         <input type="checkbox" checked={selected.has(job.id)}
                           onChange={() => toggleSelect(job.id)} className="accent-indigo-500" />
                       </td>
 
                       {/* Title — sticky, no wrap, truncate */}
-                      <td className="px-3 py-2.5 w-56 sticky left-8 bg-inherit z-10">
+                      <td className={`px-3 py-2.5 w-56 sticky left-8 z-20 ${selected.has(job.id) ? 'bg-indigo-950' : 'bg-gray-900 group-hover:bg-gray-800'}`}>
                         <a href={job.url} target="_blank" rel="noopener noreferrer"
                           className="text-white font-medium hover:text-indigo-300 transition-colors block truncate max-w-[210px]"
                           title={job.title}>
@@ -359,39 +361,29 @@ export default function JobsPage() {
                     {/* Expanded detail row */}
                     {expanded === job.id && (
                       <tr key={`${job.id}-exp`}>
-                        <td colSpan={13} className="bg-gray-950/70 border-t border-b border-gray-800 px-6 py-4">
-                          <div className="grid grid-cols-3 gap-6">
+                        <td colSpan={13} className="bg-gray-950 border-t border-b border-gray-800 px-6 py-5">
 
-                            {/* Col 1: AI Ranking */}
-                            <div className="space-y-3">
-                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">AI Analysis</p>
+                          {/* Top 3 panels */}
+                          <div className="grid grid-cols-3 gap-6 mb-5">
+
+                            {/* Panel 1: AI Analysis */}
+                            <div className="space-y-2.5">
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800 pb-1">AI Analysis</p>
                               {job.ai_ranking ? (
                                 <>
                                   {job.ai_ranking.key_skills && (
-                                    <div>
-                                      <p className="text-xs text-gray-500 mb-0.5">Key Skills Match</p>
-                                      <p className="text-sm text-green-300">{job.ai_ranking.key_skills}</p>
-                                    </div>
-                                  )}
-                                  {job.ai_ranking.tailoring_notes && (
-                                    <div>
-                                      <p className="text-xs text-gray-500 mb-0.5">Tailoring Tips</p>
-                                      <p className="text-sm text-blue-300">{job.ai_ranking.tailoring_notes}</p>
-                                    </div>
+                                    <div><p className="text-xs text-gray-500">Key Skills</p><p className="text-sm text-green-300">{job.ai_ranking.key_skills}</p></div>
                                   )}
                                   {job.ai_ranking.red_flags && (
-                                    <div>
-                                      <p className="text-xs text-gray-500 mb-0.5">Red Flags</p>
-                                      <p className="text-sm text-red-300">{job.ai_ranking.red_flags}</p>
-                                    </div>
+                                    <div><p className="text-xs text-gray-500">Red Flags</p><p className="text-sm text-red-300">{job.ai_ranking.red_flags}</p></div>
+                                  )}
+                                  {job.ai_ranking.tailoring_notes && (
+                                    <div><p className="text-xs text-gray-500">Tailoring Tips</p><p className="text-sm text-blue-300">{job.ai_ranking.tailoring_notes}</p></div>
                                   )}
                                   {job.ai_ranking.reason && (
-                                    <div>
-                                      <p className="text-xs text-gray-500 mb-0.5">Reason</p>
-                                      <p className="text-sm text-gray-300">{job.ai_ranking.reason}</p>
-                                    </div>
+                                    <div><p className="text-xs text-gray-500">Ranking Reason</p><p className="text-sm text-gray-300">{job.ai_ranking.reason}</p></div>
                                   )}
-                                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs pt-1">
+                                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs pt-1 border-t border-gray-800">
                                     {[
                                       ['Beginner Friendly', job.ai_ranking.beginner_friendly],
                                       ['GTO/Traineeship', job.ai_ranking.gto_traineeship],
@@ -411,18 +403,19 @@ export default function JobsPage() {
                                   </div>
                                 </>
                               ) : (
-                                <p className="text-gray-600 text-xs">Not yet ranked — click ⚡ Rank All</p>
+                                <p className="text-gray-600 text-xs italic">Not yet ranked — click ⚡ Rank All above</p>
                               )}
                             </div>
 
-                            {/* Col 2: Job Details from Apify */}
-                            <div className="space-y-3">
-                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Job Details</p>
-                              <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                            {/* Panel 2: All Job Details from Apify */}
+                            <div className="space-y-2">
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800 pb-1">Job Details</p>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                                 {[
+                                  ['Employer', job.employer],
                                   ['Area', rp.joblocationInfo?.area],
                                   ['Suburb', rp.joblocationInfo?.suburb],
-                                  ['Display Location', rp.joblocationInfo?.displayLocation],
+                                  ['Location', rp.joblocationInfo?.displayLocation || job.location],
                                   ['Work Type', rp.workTypes || job.work_type],
                                   ['Arrangement', rp.workArrangements],
                                   ['Salary', rp.salary || job.salary_text],
@@ -440,9 +433,9 @@ export default function JobsPage() {
                               </div>
                             </div>
 
-                            {/* Col 3: Links + Apply */}
-                            <div className="space-y-3">
-                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Links & Apply</p>
+                            {/* Panel 3: Links + Actions */}
+                            <div className="space-y-2">
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800 pb-1">Links & Actions</p>
                               <div className="space-y-2">
                                 {(rp.jobLink || job.url) && (
                                   <a href={(rp.jobLink || job.url) as string} target="_blank" rel="noopener noreferrer"
@@ -456,8 +449,7 @@ export default function JobsPage() {
                                     ✉️ Apply directly
                                   </a>
                                 )}
-                                <button
-                                  onClick={() => alert('Generate Resume + Cover Letter — coming in Phase 6')}
+                                <button onClick={() => alert('Generate Resume + Cover Letter — coming in Phase 6')}
                                   className="w-full px-3 py-2 bg-green-900/50 hover:bg-green-900 rounded-lg text-xs text-green-300 transition-colors text-left">
                                   📄 Generate Resume + Cover Letter
                                 </button>
@@ -468,6 +460,19 @@ export default function JobsPage() {
                               </div>
                             </div>
                           </div>
+
+                          {/* Full-width Job Description */}
+                          {job.description_text && (
+                            <div className="border-t border-gray-800 pt-4">
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Job Description</p>
+                              <div className="bg-gray-900 rounded-lg p-4 max-h-64 overflow-y-auto">
+                                <p className="text-gray-300 text-sm whitespace-pre-line leading-relaxed">
+                                  {job.description_text}
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
                         </td>
                       </tr>
                     )}

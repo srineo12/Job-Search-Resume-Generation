@@ -133,6 +133,10 @@ const PRI_LABEL: Record<string, string> = {
   hot: '🔥 Hot', good: '✅ Good', maybe: '🤔 Maybe', avoid: '❌ Avoid',
 }
 
+function stripBulletPrefix(s: string): string {
+  return s.replace(/^bullet:\s*/i, '')
+}
+
 function relDate(d: string) {
   if (!d) return '—'
   const diff = Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
@@ -150,8 +154,9 @@ export default function JobsPage() {
   const [loading, setLoading]   = useState(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [ranking, setRanking]   = useState(false)
-  const [rankMsg, setRankMsg]   = useState('')
+  const [ranking,    setRanking]    = useState(false)
+  const [rankMsg,    setRankMsg]    = useState('')
+  const [generating, setGenerating] = useState<string | null>(null)  // jobId being generated
 
   // Filters — multi-select Sets; empty Set = show all
   const [priFilters,  setPriFilters]  = useState<Set<string>>(new Set())
@@ -352,6 +357,33 @@ export default function JobsPage() {
     if (!confirm('Delete this job?')) return
     await fetch('/api/jobs', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id}) })
     loadJobs()
+  }
+
+  async function handleGenerate(jobId: string) {
+    setGenerating(jobId)
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/generate`, { method: 'POST' })
+      if (!res.ok) {
+        const d = await res.json()
+        alert(`Generation failed: ${d.error ?? res.statusText}`)
+        return
+      }
+      // Trigger ZIP download
+      const blob = await res.blob()
+      const cd = res.headers.get('Content-Disposition') ?? ''
+      const filename = cd.match(/filename="([^"]+)"/)?.[1] ?? 'documents.zip'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = filename; a.click()
+      URL.revokeObjectURL(url)
+      // Update local status
+      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'documents_generated' } : j))
+      setCounts(prev => ({ ...prev, open: prev.open - 1, generated: prev.generated + 1 }))
+    } catch (err) {
+      alert(`Generation error: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setGenerating(null)
+    }
   }
 
   function toggleSelect(id: string) {
@@ -599,19 +631,23 @@ export default function JobsPage() {
                           case 'location':
                             return cell(trunc(job.location), stickyCls)
 
-                          case 'role_description':
+                          case 'role_description': {
+                            const rd = job.ai_ranking?.role_description?.map(stripBulletPrefix) ?? []
                             return <td key={col.key} className="px-2 py-2 text-white overflow-hidden">
-                              {job.ai_ranking?.role_description?.length
-                                ? <span className="block truncate" title={job.ai_ranking.role_description.join('\n')}>{job.ai_ranking.role_description[0]}</span>
+                              {rd.length
+                                ? <span className="block truncate" title={rd.join('\n')}>{rd[0]}</span>
                                 : <span className="text-gray-600">—</span>}
                             </td>
+                          }
 
-                          case 'ranking_comments':
+                          case 'ranking_comments': {
+                            const rc = job.ai_ranking?.ranking_comments?.map(stripBulletPrefix) ?? []
                             return <td key={col.key} className="px-2 py-2 text-white overflow-hidden">
-                              {job.ai_ranking?.ranking_comments?.length
-                                ? <span className="block truncate" title={job.ai_ranking.ranking_comments.join('\n')}>{job.ai_ranking.ranking_comments[0]}</span>
+                              {rc.length
+                                ? <span className="block truncate" title={rc.join('\n')}>{rc[0]}</span>
                                 : <span className="text-gray-600">—</span>}
                             </td>
+                          }
 
                           case 'ai_score':
                             return <td key={col.key} className="px-2 py-2 text-center">
@@ -629,16 +665,28 @@ export default function JobsPage() {
 
                           case 'workflow_status':
                             return <td key={col.key} className="px-2 py-1.5">
-                              <select
-                                value={wf}
-                                onChange={e => setWorkflow(job.id, e.target.value, e.target.value === 'applied' ? job.url : undefined)}
-                                className={`w-full rounded px-1.5 py-0.5 text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 ${WF_STYLE[wf]}`}
-                              >
-                                <option value="open">Open</option>
-                                <option value="generated">Generated</option>
-                                <option value="applied">Applied</option>
-                                <option value="discarded">Discarded</option>
-                              </select>
+                              <div className="flex items-center gap-1">
+                                <select
+                                  value={wf}
+                                  onChange={e => setWorkflow(job.id, e.target.value, e.target.value === 'applied' ? job.url : undefined)}
+                                  className={`flex-1 rounded px-1.5 py-0.5 text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 ${WF_STYLE[wf]}`}
+                                >
+                                  <option value="open">Open</option>
+                                  <option value="generated">Generated</option>
+                                  <option value="applied">Applied</option>
+                                  <option value="discarded">Discarded</option>
+                                </select>
+                                {wf === 'open' && (
+                                  <button
+                                    onClick={() => handleGenerate(job.id)}
+                                    disabled={generating === job.id}
+                                    title="Generate Resume & Cover Letter"
+                                    className="px-1.5 py-0.5 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs rounded whitespace-nowrap"
+                                  >
+                                    {generating === job.id ? '⚙️…' : '📄 Gen'}
+                                  </button>
+                                )}
+                              </div>
                             </td>
 
                           case 'salary_text':
@@ -685,12 +733,12 @@ export default function JobsPage() {
                                 <>
                                   {job.ai_ranking.role_description?.length && (
                                     <div><p className="text-xs text-gray-500 mb-1">Role Description</p>
-                                      <ul className="space-y-0.5">{job.ai_ranking.role_description.map((b,i) => <li key={i} className="text-sm text-cyan-300">• {b}</li>)}</ul>
+                                      <ul className="space-y-0.5">{job.ai_ranking.role_description.map((b,i) => <li key={i} className="text-sm text-cyan-300">• {stripBulletPrefix(b)}</li>)}</ul>
                                     </div>
                                   )}
                                   {job.ai_ranking.ranking_comments?.length && (
                                     <div><p className="text-xs text-gray-500 mb-1">Why this score</p>
-                                      <ul className="space-y-0.5">{job.ai_ranking.ranking_comments.map((b,i) => <li key={i} className="text-sm text-amber-300">• {b}</li>)}</ul>
+                                      <ul className="space-y-0.5">{job.ai_ranking.ranking_comments.map((b,i) => <li key={i} className="text-sm text-amber-300">• {stripBulletPrefix(b)}</li>)}</ul>
                                     </div>
                                   )}
                                   {job.ai_ranking.key_skills && <div><p className="text-xs text-gray-500">Key Skills</p><p className="text-sm text-green-300">{job.ai_ranking.key_skills}</p></div>}

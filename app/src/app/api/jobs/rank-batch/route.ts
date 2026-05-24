@@ -49,8 +49,8 @@ Respond ONLY with valid JSON (no markdown, no explanation):
   "key_skills": "top 3 matching skills from this job",
   "red_flags": "any disqualifying requirements or concerns",
   "tailoring_notes": "specific tip for applying to this role",
-  "ranking_comments": ["bullet: why score is high or low", "bullet: key factor", "bullet: any risk or boost"],
-  "role_description": ["bullet: what the role involves day-to-day", "bullet: type of work/environment", "bullet: who they support or work with"]
+  "ranking_comments": ["why score is high or low", "key factor", "any risk or boost"],
+  "role_description": ["what the role involves day-to-day", "type of work/environment", "who they support or work with"]
 }`
 
 export async function POST(request: NextRequest) {
@@ -136,8 +136,8 @@ RESPOND WITH VALID JSON ONLY (no markdown). Include ALL of these fields:
   "key_skills": "top 3 matching skills from this job",
   "red_flags": "any disqualifying requirements or concerns",
   "tailoring_notes": "specific tip for applying to this role",
-  "ranking_comments": ["bullet: why score is high or low", "bullet: key factor", "bullet: any risk or boost"],
-  "role_description": ["bullet: what the role involves day-to-day", "bullet: type of work/environment", "bullet: who they support or work with"]
+  "ranking_comments": ["why score is high or low", "key factor", "any risk or boost"],
+  "role_description": ["what the role involves day-to-day", "type of work/environment", "who they support or work with"]
 }`
 
   const fullSystemPrompt = [

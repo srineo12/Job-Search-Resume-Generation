@@ -1,12 +1,14 @@
 # Session Handoff
 
-_Last updated: 2026-05-24_
+_Last updated: 2026-05-24 (new session — no changes made)_
 
 ---
 
 ## 1. Session Summary
 
-This session completed **Phase 6 (Document Generation)** and fixed several UI/UX and stability issues:
+No code changes in this session. This handoff carries forward the state from the previous session.
+
+**Previous session (last substantive work) completed Phase 6 (Document Generation) and fixed several UI/UX and stability issues:**
 
 - Built the full resume & cover letter generation pipeline (AI → DOCX + PDF → ZIP download)
 - Fixed dashboard crash caused by `user!.id` being null with auth bypassed
@@ -24,6 +26,10 @@ This session completed **Phase 6 (Document Generation)** and fixed several UI/UX
 
 ## 2. Files Changed
 
+_(No files changed this session. See previous commits for history.)_
+
+Last substantive changes (previous session):
+
 | File | Purpose |
 |------|---------|
 | `app/src/app/(protected)/jobs/page.tsx` | Full rewrite — resizable/reorderable columns, multi-select filters, category filter, toast notifications, Gen button, Status dropdown |
@@ -39,7 +45,7 @@ This session completed **Phase 6 (Document Generation)** and fixed several UI/UX
 | `app/src/lib/render/cover-letter-docx.ts` | **NEW** — Cover letter DOCX renderer |
 | `app/src/lib/render/resume-pdf.ts` | **NEW** — Resume PDF renderer via pdfkit |
 | `app/src/lib/render/cover-letter-pdf.ts` | **NEW** — Cover letter PDF renderer |
-| `app/src/lib/ai/generate-documents.ts` | **NEW** — OpenAI calls for structured resume + cover letter JSON |
+| `app/src/lib/ai/generate-documents.ts` | **NEW** — Claude API calls for structured resume + cover letter JSON |
 | `.claude/commands/handoff.md` | **NEW** — /handoff slash command |
 | `.claude/commands/resume.md` | **NEW** — /resume slash command |
 
@@ -50,7 +56,7 @@ This session completed **Phase 6 (Document Generation)** and fixed several UI/UX
 ### ✅ Working
 - Jobs page: resizable/reorderable columns, multi-select filters, category filter, save layout
 - Ranking: ranks unranked jobs, Re-rank button for all jobs, batches of 3, live progress
-- Document generation: Gen button on Open jobs → OpenAI → DOCX + PDF → ZIP download → status → Generated
+- Document generation: Gen button on Open jobs → Claude API → DOCX + PDF → ZIP download → status → Generated
 - Toast notifications: file saved location, success/failure counts
 - Status dropdown inline in table (Open/Generated/Applied/Discarded)
 - Login: permanently disabled, redirects to dashboard
@@ -85,7 +91,7 @@ This session completed **Phase 6 (Document Generation)** and fixed several UI/UX
 
 2. **pdfkit on Vercel** — If PDF generation fails (font not found error), the fix is to remove PDF generation and return DOCX-only ZIP. The user can convert DOCX→PDF using Word/Google Docs.
 
-3. **app_logs table** — Still not created in Supabase. Logger fails silently, console.log still works in local dev.
+3. **app_logs table** — Still not created in Supabase. Logger fails silently; console.log still works in local dev.
 
 ---
 
@@ -101,7 +107,7 @@ This session completed **Phase 6 (Document Generation)** and fixed several UI/UX
 
 ## 6. Gotchas
 
-- **`export const runtime = 'nodejs'`** is required on any API route that uses `pdfkit`, `docx`, or `jszip` — without it, Next.js 16 may bundle these for Edge runtime and crash
+- **`export const runtime = 'nodejs'`** is required on any API route that uses `pdfkit`, `docx`, or `jszip` — without it, Next.js 15/16 may bundle these for Edge runtime and crash
 - **Auth bypass** works via `getAuth()` in `lib/supabase/get-auth.ts` — always use this helper, never call `supabase.auth.getUser()` directly in server components
 - **"Bullet:" prefix** — old ranked jobs (ranked before the prompt fix) store "Bullet: text" in `ranking_comments` and `role_description`. The display strips this with `stripBulletPrefix()`. Re-ranking will fix the stored data.
 - **Status column width** — needs to be ≥160px or the Gen button overlaps the Salary column. Default is 160, Save Layout preserves it.

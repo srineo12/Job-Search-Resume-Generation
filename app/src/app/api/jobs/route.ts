@@ -35,10 +35,36 @@ export async function GET(request: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  // ── Build category map: import_id → keyword set name ──
+  const importIds = [...new Set((data ?? []).map(j => j.import_id).filter(Boolean))] as string[]
+  const categoryMap: Record<string, string> = {}
+  if (importIds.length > 0) {
+    const { data: imports } = await supabase
+      .from('imports').select('id, keyword_set_ids').in('id', importIds)
+    if (imports?.length) {
+      const allKwIds = [...new Set(imports.flatMap(i => (i.keyword_set_ids as string[]) ?? []))]
+      if (allKwIds.length > 0) {
+        const { data: kwSets } = await supabase
+          .from('keyword_sets').select('id, name').in('id', allKwIds)
+        const kwMap = Object.fromEntries((kwSets ?? []).map(k => [k.id, k.name as string]))
+        for (const imp of imports) {
+          const ids = (imp.keyword_set_ids as string[]) ?? []
+          const name = ids.map(id => kwMap[id]).filter(Boolean).join(', ')
+          if (name) categoryMap[imp.id] = name
+        }
+      }
+    }
+  }
+
+  const jobsWithCategory = (data ?? []).map(j => ({
+    ...j,
+    category: j.import_id ? (categoryMap[j.import_id] ?? '') : '',
+  }))
+
   // Counts for header badges
   const { data: countData } = await supabase
     .from('jobs')
-    .select('ai_priority, ai_ranked_at, status')
+    .select('ai_priority, ai_ranked_at, status, import_id')
     .eq('user_id', user.id)
     .is('is_duplicate_of', null)
 
@@ -49,14 +75,13 @@ export async function GET(request: NextRequest) {
     maybe:    countData?.filter(j => j.ai_priority === 'maybe').length || 0,
     avoid:    countData?.filter(j => j.ai_priority === 'avoid').length || 0,
     unranked: countData?.filter(j => !j.ai_ranked_at).length || 0,
-    // workflow counts
     open:      countData?.filter(j => !['documents_generated','applied','skipped'].includes(j.status)).length || 0,
     generated: countData?.filter(j => j.status === 'documents_generated').length || 0,
     applied:   countData?.filter(j => j.status === 'applied').length || 0,
     discarded: countData?.filter(j => j.status === 'skipped').length || 0,
   }
 
-  return NextResponse.json({ jobs: data || [], counts })
+  return NextResponse.json({ jobs: jobsWithCategory, counts })
 }
 
 /** PATCH — update workflow status for a job */

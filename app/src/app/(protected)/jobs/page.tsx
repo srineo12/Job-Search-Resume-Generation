@@ -37,6 +37,7 @@ interface Job {
     role_description?: string[]
   } | null
   ai_ranked_at: string | null
+  category: string
   description_text: string | null
   description_html: string | null
   raw_payload: {
@@ -96,6 +97,7 @@ interface ColDef {
 
 const ALL_COLS: ColDef[] = [
   { key: 'source_job_id',     label: 'Job ID',      defaultWidth: 90,  sortable: true,  filterable: true,  filterType: 'text' },
+  { key: 'category',          label: 'Category',    defaultWidth: 130, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
   { key: 'title',             label: 'Job Title',   defaultWidth: 230, sortable: true,  filterable: true,  filterType: 'text', sticky: true },
   { key: 'employer',          label: 'Employer',    defaultWidth: 140, sortable: true,  filterable: true,  filterType: 'text' },
   { key: 'location',          label: 'Location',    defaultWidth: 160, sortable: true,  filterable: true,  filterType: 'text' },
@@ -159,6 +161,7 @@ export default function JobsPage() {
   const [generating, setGenerating] = useState<string | null>(null)  // jobId being generated
 
   // Filters — multi-select Sets; empty Set = show all
+  const [catFilters,  setCatFilters]  = useState<Set<string>>(new Set())
   const [priFilters,  setPriFilters]  = useState<Set<string>>(new Set())
   const [wfFilters,   setWfFilters]   = useState<Set<string>>(new Set())
   const [colFilters, setColFilters] = useState<Record<string, string>>({})
@@ -191,6 +194,8 @@ export default function JobsPage() {
   // ── Filter + sort pipeline ────────────────────────────────────────────────
   const visible = jobs
     .filter(j => {
+      // Category multi-select (empty = show all)
+      if (catFilters.size > 0 && !catFilters.has(j.category ?? '')) return false
       // Priority multi-select (empty = show all)
       if (priFilters.size > 0) {
         const matchesPri = priFilters.has(j.ai_priority ?? '') ||
@@ -218,6 +223,7 @@ export default function JobsPage() {
       else if (sortKey === 'employer')  { av = a.employer; bv = b.employer }
       else if (sortKey === 'title')     { av = a.title; bv = b.title }
       else if (sortKey === 'location')  { av = a.location; bv = b.location }
+      else if (sortKey === 'category')  { av = a.category; bv = b.category }
       else if (sortKey === 'ai_priority') { const o={hot:4,good:3,maybe:2,avoid:1} as Record<string,number>; av=o[a.ai_priority??'']??0; bv=o[b.ai_priority??'']??0 }
       else if (sortKey === 'workflow_status') { av = wfOf(a.status); bv = wfOf(b.status) }
       else if (sortKey === 'applicants') { av = a.raw_payload?.numApplicants ?? -1; bv = b.raw_payload?.numApplicants ?? -1 }
@@ -228,7 +234,8 @@ export default function JobsPage() {
     })
 
   // Unique values for select filters
-  const workTypes   = [...new Set(jobs.map(j => j.work_type).filter(Boolean))]
+  const categories   = [...new Set(jobs.map(j => j.category).filter(Boolean))].sort()
+  const workTypes    = [...new Set(jobs.map(j => j.work_type).filter(Boolean))]
   const arrangements = [...new Set(jobs.map(j => j.raw_payload?.workArrangements as string).filter(Boolean))]
 
   // ── Column resize ─────────────────────────────────────────────────────────
@@ -280,7 +287,6 @@ export default function JobsPage() {
   // ── Workflow status update ────────────────────────────────────────────────
   async function setWorkflow(jobId: string, workflow: string, url?: string) {
     if (workflow === 'applied' && url) window.open(url, '_blank')
-    if (workflow === 'generated') { alert('Resume & Cover Letter generation coming in Phase 6.') }
     await fetch('/api/jobs', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -404,7 +410,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs</h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.0</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unranked
           </p>
@@ -439,6 +445,28 @@ export default function JobsPage() {
 
       {rankMsg && (
         <div className="mb-3 p-2.5 bg-indigo-950 border border-indigo-800 rounded-lg text-indigo-300 text-xs">{rankMsg}</div>
+      )}
+
+      {/* ── Category filter ── */}
+      {categories.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-2 items-center">
+          <span className="text-gray-600 text-xs">Category:</span>
+          <div className="flex gap-1 flex-wrap">
+            {categories.map(cat => {
+              const on = catFilters.has(cat)
+              return (
+                <button key={cat}
+                  onClick={() => setCatFilters(s => { const n = new Set(s); n.has(cat) ? n.delete(cat) : n.add(cat); return n })}
+                  className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors border ${on ? 'bg-teal-700 border-teal-600 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-800'}`}>
+                  {cat}
+                </button>
+              )
+            })}
+            {catFilters.size > 0 && (
+              <button onClick={() => setCatFilters(new Set())} className="px-2 py-1 text-xs text-gray-500 hover:text-gray-300">✕</button>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ── Filter bar ── */}
@@ -566,7 +594,7 @@ export default function JobsPage() {
                         onChange={e => setColFilters(p => ({ ...p, [col.key]: e.target.value }))}
                         className="w-full bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white text-xs focus:outline-none focus:border-indigo-500">
                         <option value="">All</option>
-                        {(col.key === 'work_type' ? workTypes : col.key === 'arrangement' ? arrangements : col.filterOptions ?? []).map(o => (
+                        {(col.key === 'work_type' ? workTypes : col.key === 'arrangement' ? arrangements : col.key === 'category' ? categories : col.filterOptions ?? []).map(o => (
                           <option key={o} value={o}>{o}</option>
                         ))}
                       </select>
@@ -623,6 +651,13 @@ export default function JobsPage() {
                               {job.ai_ranking?.reason && (
                                 <p className="text-gray-500 text-xs mt-0.5 truncate italic" title={job.ai_ranking.reason}>{job.ai_ranking.reason}</p>
                               )}
+                            </td>
+
+                          case 'category':
+                            return <td key={col.key} className="px-2 py-2 text-white overflow-hidden">
+                              {job.category
+                                ? <span className="px-1.5 py-0.5 rounded bg-teal-900/60 text-teal-300 border border-teal-700 text-xs truncate block" title={job.category}>{job.category}</span>
+                                : <span className="text-gray-600">—</span>}
                             </td>
 
                           case 'employer':

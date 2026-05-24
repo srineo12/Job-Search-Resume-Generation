@@ -1,3 +1,5 @@
+export const runtime = 'nodejs'  // pdfkit + docx require Node.js — not Edge
+
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
 import { generateResumeData, generateCoverLetterData } from '@/lib/ai/generate-documents'

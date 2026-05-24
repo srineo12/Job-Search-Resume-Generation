@@ -76,15 +76,26 @@ export async function calculateAtsScore(
 
 const RESUME_SYSTEM_PROMPT = `You are generating a tailored ATS-friendly resume for a job application.
 
+CRITICAL — EXPERIENCE COMPLETENESS (most common failure):
+- Count the number of experience roles in the candidate profile BEFORE writing anything
+- Your output MUST contain EXACTLY that many entries in the "experience" array — no more, no fewer
+- NEVER drop, skip, or merge roles — even if they seem unrelated to the job
+- Tailor by adjusting BULLET COUNT and FOCUS, not by removing roles
+
+BULLET COUNT GUIDE per role:
+- Primary relevant role (most directly matches the job): 5 bullets
+- Secondary relevant roles (transferable skills): 3–4 bullets
+- Older or less relevant roles: 2–3 bullets — keep factual, highlight transferable aspects only
+
 STRICT RULES:
 1. NEVER invent new jobs, qualifications, degrees, or skills not in the profile
-2. You MAY reorder or rewrite bullet points to highlight relevance — using the same facts
-3. You MAY select which key_skills to include (choose most relevant, max 12)
-4. The summary MUST be tailored specifically to this job
-5. Keep bullet points concise action-verb statements (start with verb, no "Bullet:" prefix)
-6. Include ALL experience roles from the profile (do not omit any)
-7. Keep all education entries exactly as provided
-8. additional_info should only include items relevant to this specific job
+2. Rewrite bullets to highlight what is most relevant to this specific job — same facts, different emphasis
+3. Summary: 3–4 sentences — candidate type, most relevant experience, key transferable strengths, availability/eligibility
+4. Bullet points: start with action verb, concise, no "Bullet:" prefix, no invented content
+5. key_skills: up to 12 most relevant from the profile
+6. technical_skills: include ALL from the profile
+7. education: include ALL degrees exactly as provided
+8. additional_info: include only items directly relevant to this job (rights, availability, willingness)
 
 Respond with valid JSON only — no markdown, no explanation.`
 
@@ -118,19 +129,23 @@ export async function generateResumeData(
     linkedin: contact.linkedin,
   }
 
+  const experienceCount = Array.isArray(profile.experience) ? (profile.experience as unknown[]).length : '?'
+
   const schema = `{
   "summary": "3-4 sentence tailored summary. Sentence 1: candidate type + breadth of experience. Sentence 2: most relevant current role. Sentence 3: strongest transferable skills. Sentence 4: eligibility/availability/commitment.",
-  "key_skills": ["skill 1", "skill 2", "...up to 12 most relevant skills from profile"],
+  "key_skills": ["up to 12 most relevant skills from profile"],
   "experience": [
+    /* MUST contain exactly ${experienceCount} entries — one per role in the profile. Do NOT drop any. */
     {
       "role": "exact role title from profile",
       "company": "exact company from profile",
       "period": "Month Year - Month Year",
       "location": "City, Country",
-      "bullets": ["3-5 action verb bullets per role, tailored to relevance for this job"]
+      "bullets": ["2-5 action verb bullets — count based on relevance to this job"]
     }
   ],
   "education": [
+    /* Include ALL degrees from profile */
     {
       "degree": "full degree name",
       "institution": "institution name",
@@ -140,8 +155,8 @@ export async function generateResumeData(
     }
   ],
   "certifications": "certifications and checks text",
-  "technical_skills": ["all relevant technical skills from profile"],
-  "additional_info": ["relevant availability/eligibility/willingness points for this specific job"]
+  "technical_skills": ["ALL technical skills from profile"],
+  "additional_info": ["only items relevant to this specific job"]
 }`
 
   const userMsg = `JOB DETAILS:

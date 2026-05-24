@@ -35,6 +35,10 @@ interface Job {
     tailoring_notes?: string
     ranking_comments?: string[]
     role_description?: string[]
+    ats_score?: number
+    ats_verdict?: string
+    ats_matched_keywords?: string[]
+    ats_missing_keywords?: string[]
   } | null
   ai_ranked_at: string | null
   category: string
@@ -104,6 +108,7 @@ const ALL_COLS: ColDef[] = [
   { key: 'role_description',  label: 'Role',        defaultWidth: 190, sortable: false, filterable: false, filterType: 'text' },
   { key: 'ranking_comments',  label: 'Why',         defaultWidth: 190, sortable: false, filterable: false, filterType: 'text' },
   { key: 'ai_score',          label: 'Score',       defaultWidth: 65,  sortable: true,  filterable: true,  filterType: 'range' },
+  { key: 'ats_score',         label: 'ATS',         defaultWidth: 65,  sortable: true,  filterable: true,  filterType: 'range' },
   { key: 'ai_priority',       label: 'Priority',    defaultWidth: 95,  sortable: true,  filterable: true,  filterType: 'select', filterOptions: ['hot','good','maybe','avoid'] },
   { key: 'workflow_status',   label: 'Status',      defaultWidth: 160, sortable: true,  filterable: true,  filterType: 'select', filterOptions: ['open','generated','applied','discarded'] },
   { key: 'salary_text',       label: 'Salary',      defaultWidth: 145, sortable: false, filterable: true,  filterType: 'text' },
@@ -221,6 +226,7 @@ export default function JobsPage() {
       if (colFilters.arrangement && (j.raw_payload?.workArrangements ?? '') !== colFilters.arrangement) return false
       if (colFilters.ai_priority && j.ai_priority !== colFilters.ai_priority) return false
       if (colFilters.workflow_status && wfOf(j.status) !== colFilters.workflow_status) return false
+      if (colFilters.ats_score && (j.ai_ranking?.ats_score ?? 0) < parseInt(colFilters.ats_score)) return false
       if (scoreMin && (j.ai_score ?? 0) < parseInt(scoreMin)) return false
       return true
     })
@@ -228,6 +234,7 @@ export default function JobsPage() {
       if (!sortKey || !sortDir) return 0
       let av: unknown, bv: unknown
       if (sortKey === 'ai_score')     { av = a.ai_score ?? -1; bv = b.ai_score ?? -1 }
+      else if (sortKey === 'ats_score') { av = a.ai_ranking?.ats_score ?? -1; bv = b.ai_ranking?.ats_score ?? -1 }
       else if (sortKey === 'posted_at') { av = a.posted_at; bv = b.posted_at }
       else if (sortKey === 'employer')  { av = a.employer; bv = b.employer }
       else if (sortKey === 'title')     { av = a.title; bv = b.title }
@@ -452,7 +459,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.2</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.3</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unranked
           </p>
@@ -733,6 +740,28 @@ export default function JobsPage() {
                                 : <span className="text-gray-700">—</span>}
                             </td>
 
+                          case 'ats_score': {
+                            const ats = job.ai_ranking?.ats_score
+                            const verdict = job.ai_ranking?.ats_verdict ?? ''
+                            const matched = job.ai_ranking?.ats_matched_keywords ?? []
+                            const missing = job.ai_ranking?.ats_missing_keywords ?? []
+                            const tooltip = ats != null
+                              ? [
+                                  verdict,
+                                  matched.length ? `✓ ${matched.join(', ')}` : '',
+                                  missing.length ? `✗ missing: ${missing.join(', ')}` : '',
+                                ].filter(Boolean).join('\n')
+                              : 'Generate documents to calculate ATS score'
+                            return <td key={col.key} className="px-2 py-2 text-center">
+                              {ats != null
+                                ? <span
+                                    title={tooltip}
+                                    className={`text-sm font-bold cursor-help ${ats>=80?'text-emerald-400':ats>=65?'text-yellow-400':'text-red-400'}`}
+                                  >{ats}</span>
+                                : <span className="text-gray-700" title={tooltip}>—</span>}
+                            </td>
+                          }
+
                           case 'ai_priority':
                             return <td key={col.key} className="px-2 py-2">
                               {job.ai_priority
@@ -807,6 +836,21 @@ export default function JobsPage() {
                                   {job.ai_ranking.ranking_comments?.length && (
                                     <div><p className="text-xs text-gray-500 mb-1">Why this score</p>
                                       <ul className="space-y-0.5">{job.ai_ranking.ranking_comments.map((b,i) => <li key={i} className="text-sm text-amber-300">• {stripBulletPrefix(b)}</li>)}</ul>
+                                    </div>
+                                  )}
+                                  {job.ai_ranking.ats_score != null && (
+                                    <div>
+                                      <p className="text-xs text-gray-500 mb-1">ATS Score</p>
+                                      <p className={`text-lg font-bold ${job.ai_ranking.ats_score>=80?'text-emerald-400':job.ai_ranking.ats_score>=65?'text-yellow-400':'text-red-400'}`}>
+                                        {job.ai_ranking.ats_score}/100
+                                      </p>
+                                      {job.ai_ranking.ats_verdict && <p className="text-xs text-gray-400 mt-0.5 italic">{job.ai_ranking.ats_verdict}</p>}
+                                      {(job.ai_ranking.ats_matched_keywords?.length ?? 0) > 0 && (
+                                        <p className="text-xs text-emerald-400 mt-1">✓ {job.ai_ranking.ats_matched_keywords!.join(', ')}</p>
+                                      )}
+                                      {(job.ai_ranking.ats_missing_keywords?.length ?? 0) > 0 && (
+                                        <p className="text-xs text-red-400 mt-0.5">✗ missing: {job.ai_ranking.ats_missing_keywords!.join(', ')}</p>
+                                      )}
                                     </div>
                                   )}
                                   {job.ai_ranking.key_skills && <div><p className="text-xs text-gray-500">Key Skills</p><p className="text-sm text-green-300">{job.ai_ranking.key_skills}</p></div>}

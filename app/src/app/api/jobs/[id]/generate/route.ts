@@ -2,7 +2,7 @@ export const runtime = 'nodejs'  // docx requires Node.js — not Edge
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
-import { generateResumeData, generateCoverLetterData } from '@/lib/ai/generate-documents'
+import { generateResumeData, generateCoverLetterData, calculateAtsScore } from '@/lib/ai/generate-documents'
 import { buildResumeDocx } from '@/lib/render/resume-docx'
 import { buildCoverLetterDocx } from '@/lib/render/cover-letter-docx'
 import JSZip from 'jszip'
@@ -73,14 +73,19 @@ export async function POST(
     return NextResponse.json({ error: `AI generation failed: ${msg}` }, { status: 500 })
   }
 
-  // ── 5. Render DOCX ──
+  // ── 5. Render DOCX + ATS score (parallel) ──
   // PDF generation via pdfkit is disabled — Helvetica font paths fail on Vercel.
-  // Convert DOCX → PDF using Word or Google Docs if needed.
+  // ATS score runs in parallel with DOCX rendering — failure is non-fatal.
   let resumeDocx: Buffer, clDocx: Buffer
+  let atsResult: Awaited<ReturnType<typeof calculateAtsScore>> | null = null
   try {
-    ;[resumeDocx, clDocx] = await Promise.all([
+    ;[resumeDocx, clDocx, atsResult] = await Promise.all([
       buildResumeDocx(resumeData),
       buildCoverLetterDocx(clData),
+      calculateAtsScore(resumeData, job.title ?? '', job.description_text ?? '').catch(err => {
+        console.error('ATS score failed (non-fatal):', err)
+        return null
+      }),
     ])
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -102,9 +107,23 @@ export async function POST(
 
   const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 
-  // ── 7. Update job status ──
+  // ── 7. Update job status + ATS score ──
+  // Merge ATS result into existing ai_ranking JSONB (preserves ranking data)
+  const { data: currentJob } = await supabase
+    .from('jobs').select('ai_ranking').eq('id', jobId).single()
+
+  const updatedRanking = {
+    ...(currentJob?.ai_ranking ?? {}),
+    ...(atsResult ? {
+      ats_score:            atsResult.score,
+      ats_matched_keywords: atsResult.matched_keywords,
+      ats_missing_keywords: atsResult.missing_keywords,
+      ats_verdict:          atsResult.verdict,
+    } : {}),
+  }
+
   await supabase.from('jobs')
-    .update({ status: 'documents_generated' })
+    .update({ status: 'documents_generated', ai_ranking: updatedRanking })
     .eq('id', jobId)
     .eq('user_id', user.id)
 

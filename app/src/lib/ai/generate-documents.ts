@@ -1,6 +1,79 @@
 import OpenAI from 'openai'
 import type { ResumeData, CoverLetterData, CandidateContact } from '../render/types'
 
+// ─── ATS Score ────────────────────────────────────────────────────────────────
+
+export interface AtsResult {
+  score: number
+  matched_keywords: string[]
+  missing_keywords: string[]
+  verdict: string
+}
+
+const ATS_SCORE_PROMPT = `You are an ATS (Applicant Tracking System) scanner evaluating how well a resume matches a job description.
+
+Score across five weighted dimensions (total 100 pts):
+  Keywords      30 pts — required terms, phrases and role-specific language from the JD present in the resume
+  Skills        25 pts — technical and soft skills the JD requires are demonstrated in the resume
+  Experience    25 pts — depth and direct relevance of experience to this specific role
+  Qualifications 10 pts — education, certifications and checks meet stated requirements
+  Presentation  10 pts — action verbs used, achievements quantified, content clear and concise
+
+Rules:
+- Be strict. A score of 80+ means the resume is very well matched. 60-79 is reasonable. Below 60 needs work.
+- matched_keywords: up to 6 important JD terms clearly present in the resume
+- missing_keywords: up to 6 important JD terms absent from the resume that would improve ATS pass rate
+- verdict: one sentence — state the score driver and the single most impactful improvement
+
+Respond with valid JSON only:
+{
+  "score": <integer 0-100>,
+  "matched_keywords": ["keyword1", "keyword2"],
+  "missing_keywords": ["keyword1", "keyword2"],
+  "verdict": "one sentence explanation"
+}`
+
+export async function calculateAtsScore(
+  resumeData: ResumeData,
+  jobTitle: string,
+  jobDescription: string,
+): Promise<AtsResult> {
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+  // Flatten resume to plain text for scoring
+  const resumeText = [
+    `SUMMARY: ${resumeData.summary}`,
+    `KEY SKILLS: ${resumeData.key_skills.join(', ')}`,
+    `TECHNICAL SKILLS: ${resumeData.technical_skills.join(', ')}`,
+    `CERTIFICATIONS: ${resumeData.certifications}`,
+    ...resumeData.experience.map(e =>
+      `ROLE: ${e.role} at ${e.company} (${e.period})\n${e.bullets.map(b => `- ${b}`).join('\n')}`
+    ),
+    ...resumeData.education.map(e =>
+      `EDUCATION: ${e.degree}, ${e.institution}`
+    ),
+    `ADDITIONAL: ${resumeData.additional_info.join(' | ')}`,
+  ].join('\n\n')
+
+  const completion = await openai.chat.completions.create({
+    model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
+    messages: [
+      { role: 'system', content: ATS_SCORE_PROMPT },
+      { role: 'user', content: `JOB TITLE: ${jobTitle}\n\nJOB DESCRIPTION:\n${jobDescription.slice(0, 3000)}\n\nRESUME:\n${resumeText}` },
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.1,
+  })
+
+  const raw = JSON.parse(completion.choices[0]?.message?.content ?? '{}')
+  return {
+    score:            Math.min(100, Math.max(0, Math.round(Number(raw.score) || 0))),
+    matched_keywords: Array.isArray(raw.matched_keywords) ? raw.matched_keywords.map(String) : [],
+    missing_keywords: Array.isArray(raw.missing_keywords) ? raw.missing_keywords.map(String) : [],
+    verdict:          String(raw.verdict ?? ''),
+  }
+}
+
 const RESUME_SYSTEM_PROMPT = `You are generating a tailored ATS-friendly resume for a job application.
 
 STRICT RULES:

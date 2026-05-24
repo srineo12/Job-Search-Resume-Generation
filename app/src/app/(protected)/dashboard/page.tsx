@@ -1,36 +1,35 @@
-import { createClient } from '@/lib/supabase/server'
+import { getAuth } from '@/lib/supabase/get-auth'
 
 async function getStats(userId: string) {
-  const supabase = await createClient()
+  const { supabase } = await getAuth()
 
   const [
     { count: totalJobs },
-    { count: newJobs },
     { count: ranked },
-    { count: shortlisted },
+    { count: generated },
     { count: applied },
+    { count: unranked },
   ] = await Promise.all([
-    supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('user_id', userId),
-    supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'imported'),
-    supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'ranked'),
-    supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'shortlisted'),
+    supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('user_id', userId).is('is_duplicate_of', null),
+    supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('user_id', userId).not('ai_ranked_at', 'is', null),
+    supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'documents_generated'),
     supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'applied'),
+    supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('user_id', userId).is('ai_ranked_at', null).is('is_duplicate_of', null),
   ])
 
-  return { totalJobs, newJobs, ranked, shortlisted, applied }
+  return { totalJobs, ranked, generated, applied, unranked }
 }
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const stats = await getStats(user!.id)
+  const { user } = await getAuth()
+  const stats = await getStats(user?.id ?? '')
 
   const statCards = [
-    { label: 'Total Jobs', value: stats.totalJobs ?? 0, icon: '💼', color: 'text-blue-400' },
-    { label: 'New (Unranked)', value: stats.newJobs ?? 0, icon: '📥', color: 'text-yellow-400' },
-    { label: 'Ranked', value: stats.ranked ?? 0, icon: '⭐', color: 'text-purple-400' },
-    { label: 'Shortlisted', value: stats.shortlisted ?? 0, icon: '✅', color: 'text-green-400' },
-    { label: 'Applied', value: stats.applied ?? 0, icon: '📨', color: 'text-indigo-400' },
+    { label: 'Total Jobs',   value: stats.totalJobs  ?? 0, icon: '💼', color: 'text-blue-400' },
+    { label: 'Unranked',     value: stats.unranked   ?? 0, icon: '⏳', color: 'text-yellow-400' },
+    { label: 'Ranked',       value: stats.ranked     ?? 0, icon: '⭐', color: 'text-purple-400' },
+    { label: 'Generated',    value: stats.generated  ?? 0, icon: '📄', color: 'text-indigo-400' },
+    { label: 'Applied',      value: stats.applied    ?? 0, icon: '📨', color: 'text-green-400' },
   ]
 
   return (
@@ -51,27 +50,14 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      {/* Getting started */}
       {(stats.totalJobs ?? 0) === 0 && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
           <h2 className="text-white font-semibold mb-4">Getting started</h2>
           <ol className="space-y-3 text-sm text-gray-400">
-            <li className="flex gap-3">
-              <span className="text-indigo-400 font-bold">1.</span>
-              <span>Go to <strong className="text-white">Settings → Profile</strong> and add your resume data.</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="text-indigo-400 font-bold">2.</span>
-              <span>Go to <strong className="text-white">Settings → Prompts</strong> and add your ranking + generation prompts.</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="text-indigo-400 font-bold">3.</span>
-              <span>Go to <strong className="text-white">Settings → Keyword Sets</strong> and create your first keyword set.</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="text-indigo-400 font-bold">4.</span>
-              <span>Go to <strong className="text-white">Imports</strong> and trigger your first Apify job import.</span>
-            </li>
+            <li className="flex gap-3"><span className="text-indigo-400 font-bold">1.</span><span>Go to <strong className="text-white">Settings → Profile</strong> and add your resume data.</span></li>
+            <li className="flex gap-3"><span className="text-indigo-400 font-bold">2.</span><span>Go to <strong className="text-white">Settings → Prompts</strong> and review the ranking + generation prompts.</span></li>
+            <li className="flex gap-3"><span className="text-indigo-400 font-bold">3.</span><span>Go to <strong className="text-white">Settings → Keywords</strong> and create your first keyword set.</span></li>
+            <li className="flex gap-3"><span className="text-indigo-400 font-bold">4.</span><span>Go to <strong className="text-white">Imports</strong> and trigger your first Apify job import.</span></li>
           </ol>
         </div>
       )}

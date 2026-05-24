@@ -46,15 +46,15 @@ export async function generateResumeData(
   }
 
   const schema = `{
-  "summary": "2-3 sentence tailored summary for this specific role",
-  "key_skills": ["skill 1", "skill 2"],
+  "summary": "3-4 sentence tailored summary. Sentence 1: candidate type + breadth of experience. Sentence 2: most relevant current role. Sentence 3: strongest transferable skills. Sentence 4: eligibility/availability/commitment.",
+  "key_skills": ["skill 1", "skill 2", "...up to 12 most relevant skills from profile"],
   "experience": [
     {
       "role": "exact role title from profile",
       "company": "exact company from profile",
       "period": "Month Year - Month Year",
       "location": "City, Country",
-      "bullets": ["Action verb bullet 1", "Action verb bullet 2"]
+      "bullets": ["3-5 action verb bullets per role, tailored to relevance for this job"]
     }
   ],
   "education": [
@@ -67,8 +67,8 @@ export async function generateResumeData(
     }
   ],
   "certifications": "certifications and checks text",
-  "technical_skills": ["skill 1", "skill 2"],
-  "additional_info": ["relevant point 1", "relevant point 2"]
+  "technical_skills": ["all relevant technical skills from profile"],
+  "additional_info": ["relevant availability/eligibility/willingness points for this specific job"]
 }`
 
   const userMsg = `JOB DETAILS:

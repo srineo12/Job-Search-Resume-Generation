@@ -105,7 +105,7 @@ const ALL_COLS: ColDef[] = [
   { key: 'ranking_comments',  label: 'Why',         defaultWidth: 190, sortable: false, filterable: false, filterType: 'text' },
   { key: 'ai_score',          label: 'Score',       defaultWidth: 65,  sortable: true,  filterable: true,  filterType: 'range' },
   { key: 'ai_priority',       label: 'Priority',    defaultWidth: 95,  sortable: true,  filterable: true,  filterType: 'select', filterOptions: ['hot','good','maybe','avoid'] },
-  { key: 'workflow_status',   label: 'Status',      defaultWidth: 100, sortable: true,  filterable: true,  filterType: 'select', filterOptions: ['open','generated','applied','discarded'] },
+  { key: 'workflow_status',   label: 'Status',      defaultWidth: 160, sortable: true,  filterable: true,  filterType: 'select', filterOptions: ['open','generated','applied','discarded'] },
   { key: 'salary_text',       label: 'Salary',      defaultWidth: 145, sortable: false, filterable: true,  filterType: 'text' },
   { key: 'work_type',         label: 'Type',        defaultWidth: 100, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
   { key: 'arrangement',       label: 'Arrangement', defaultWidth: 115, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
@@ -158,7 +158,16 @@ export default function JobsPage() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [ranking,    setRanking]    = useState(false)
   const [rankMsg,    setRankMsg]    = useState('')
-  const [generating, setGenerating] = useState<string | null>(null)  // jobId being generated
+  const [generating, setGenerating] = useState<string | null>(null)
+
+  // Toast notifications
+  const [toasts, setToasts] = useState<Array<{ id: number; type: 'success'|'error'|'info'; msg: string; sub?: string }>>([])
+  const toastId = useRef(0)
+  function toast(type: 'success'|'error'|'info', msg: string, sub?: string) {
+    const id = ++toastId.current
+    setToasts(t => [...t, { id, type, msg, sub }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 7000)
+  }
 
   // Filters — multi-select Sets; empty Set = show all
   const [catFilters,  setCatFilters]  = useState<Set<string>>(new Set())
@@ -304,9 +313,25 @@ export default function JobsPage() {
 
   // ── Bulk workflow ─────────────────────────────────────────────────────────
   async function bulkWorkflow(workflow: string) {
-    for (const id of selected) {
-      const job = jobs.find(j => j.id === id)
-      await setWorkflow(id, workflow, workflow === 'applied' ? job?.url : undefined)
+    if (workflow === 'generated') {
+      // Bulk generate — only Open jobs
+      const openIds = [...selected].filter(id => wfOf(jobs.find(j => j.id === id)?.status ?? '') === 'open')
+      if (!openIds.length) { toast('info', 'No Open jobs selected for generation'); setSelected(new Set()); return }
+      let ok = 0, fail = 0
+      toast('info', `Generating ${openIds.length} document set${openIds.length > 1 ? 's' : ''}…`, 'Each takes ~10s. Downloads will appear one by one.')
+      for (const id of openIds) {
+        const success = await handleGenerate(id)
+        success ? ok++ : fail++
+      }
+      const msg = fail === 0
+        ? `✓ ${ok} document set${ok > 1 ? 's' : ''} generated — check your Downloads folder`
+        : `${ok} succeeded, ${fail} failed`
+      toast(fail === 0 ? 'success' : 'error', msg, 'ZIP files saved to your browser Downloads folder')
+    } else {
+      for (const id of selected) {
+        const job = jobs.find(j => j.id === id)
+        await setWorkflow(id, workflow, workflow === 'applied' ? job?.url : undefined)
+      }
     }
     setSelected(new Set())
   }
@@ -365,16 +390,15 @@ export default function JobsPage() {
     loadJobs()
   }
 
-  async function handleGenerate(jobId: string) {
+  async function handleGenerate(jobId: string): Promise<boolean> {
     setGenerating(jobId)
     try {
       const res = await fetch(`/api/jobs/${jobId}/generate`, { method: 'POST' })
       if (!res.ok) {
-        const d = await res.json()
-        alert(`Generation failed: ${d.error ?? res.statusText}`)
-        return
+        const d = await res.json().catch(() => ({}))
+        toast('error', 'Generation failed', d.error ?? res.statusText)
+        return false
       }
-      // Trigger ZIP download
       const blob = await res.blob()
       const cd = res.headers.get('Content-Disposition') ?? ''
       const filename = cd.match(/filename="([^"]+)"/)?.[1] ?? 'documents.zip'
@@ -382,11 +406,13 @@ export default function JobsPage() {
       const a = document.createElement('a')
       a.href = url; a.download = filename; a.click()
       URL.revokeObjectURL(url)
-      // Update local status
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'documents_generated' } : j))
-      setCounts(prev => ({ ...prev, open: prev.open - 1, generated: prev.generated + 1 }))
+      setCounts(prev => ({ ...prev, open: Math.max(0, prev.open - 1), generated: prev.generated + 1 }))
+      toast('success', `✓ Documents ready — saved to Downloads`, `${filename}  ·  Resume.docx / Resume.pdf / Cover_Letter.docx / Cover_Letter.pdf`)
+      return true
     } catch (err) {
-      alert(`Generation error: ${err instanceof Error ? err.message : String(err)}`)
+      toast('error', 'Generation error', err instanceof Error ? err.message : String(err))
+      return false
     } finally {
       setGenerating(null)
     }
@@ -404,8 +430,24 @@ export default function JobsPage() {
   const orderedCols = colOrder.map(k => ALL_COLS.find(c => c.key === k)!).filter(Boolean)
 
   // ─────────────────────────────────────────────────────────────────────────
+  const TOAST_STYLE: Record<string, string> = {
+    success: 'bg-green-950 border-green-700 text-green-200',
+    error:   'bg-red-950 border-red-700 text-red-300',
+    info:    'bg-indigo-950 border-indigo-700 text-indigo-200',
+  }
+
   return (
     <div className="max-w-full">
+
+      {/* ── Toast stack ── */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 max-w-md">
+        {toasts.map(t => (
+          <div key={t.id} className={`border rounded-xl px-4 py-3 shadow-2xl text-sm ${TOAST_STYLE[t.type]}`}>
+            <div className="font-semibold">{t.msg}</div>
+            {t.sub && <div className="mt-1 text-xs opacity-75 break-all">{t.sub}</div>}
+          </div>
+        ))}
+      </div>
 
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">

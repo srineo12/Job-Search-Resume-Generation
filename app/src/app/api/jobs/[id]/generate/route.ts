@@ -1,12 +1,10 @@
-export const runtime = 'nodejs'  // pdfkit + docx require Node.js — not Edge
+export const runtime = 'nodejs'  // docx requires Node.js — not Edge
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
 import { generateResumeData, generateCoverLetterData } from '@/lib/ai/generate-documents'
 import { buildResumeDocx } from '@/lib/render/resume-docx'
 import { buildCoverLetterDocx } from '@/lib/render/cover-letter-docx'
-import { buildResumePdf } from '@/lib/render/resume-pdf'
-import { buildCoverLetterPdf } from '@/lib/render/cover-letter-pdf'
 import JSZip from 'jszip'
 
 function slugify(text: string): string {
@@ -75,14 +73,14 @@ export async function POST(
     return NextResponse.json({ error: `AI generation failed: ${msg}` }, { status: 500 })
   }
 
-  // ── 5. Render DOCX + PDF ──
-  let resumeDocx: Buffer, clDocx: Buffer, resumePdf: Buffer, clPdf: Buffer
+  // ── 5. Render DOCX ──
+  // PDF generation via pdfkit is disabled — Helvetica font paths fail on Vercel.
+  // Convert DOCX → PDF using Word or Google Docs if needed.
+  let resumeDocx: Buffer, clDocx: Buffer
   try {
-    ;[resumeDocx, clDocx, resumePdf, clPdf] = await Promise.all([
+    ;[resumeDocx, clDocx] = await Promise.all([
       buildResumeDocx(resumeData),
       buildCoverLetterDocx(clData),
-      buildResumePdf(resumeData),
-      buildCoverLetterPdf(clData),
     ])
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -100,9 +98,7 @@ export async function POST(
   const zip = new JSZip()
   const folder = zip.folder(folderName)!
   folder.file(`${filePrefix}_Resume.docx`,       resumeDocx)
-  folder.file(`${filePrefix}_Resume.pdf`,        resumePdf)
   folder.file(`${filePrefix}_Cover_Letter.docx`, clDocx)
-  folder.file(`${filePrefix}_Cover_Letter.pdf`,  clPdf)
 
   const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 

@@ -408,7 +408,7 @@ export default function JobsPage() {
       URL.revokeObjectURL(url)
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'documents_generated' } : j))
       setCounts(prev => ({ ...prev, open: Math.max(0, prev.open - 1), generated: prev.generated + 1 }))
-      toast('success', `✓ Documents ready — saved to Downloads`, `${filename}  ·  Resume.docx / Resume.pdf / Cover_Letter.docx / Cover_Letter.pdf`)
+      toast('success', `✓ Documents ready — saved to Downloads`, `${filename}  ·  Resume.docx / Cover_Letter.docx`)
       return true
     } catch (err) {
       toast('error', 'Generation error', err instanceof Error ? err.message : String(err))
@@ -442,7 +442,7 @@ export default function JobsPage() {
       {/* ── Toast stack ── */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 max-w-md">
         {toasts.map(t => (
-          <div key={t.id} className={`border rounded-xl px-4 py-3 shadow-2xl text-sm ${TOAST_STYLE[t.type]}`}>
+          <div key={t.id} data-testid={`toast-${t.type}`} className={`border rounded-xl px-4 py-3 shadow-2xl text-sm ${TOAST_STYLE[t.type]}`}>
             <div className="font-semibold">{t.msg}</div>
             {t.sub && <div className="mt-1 text-xs opacity-75 break-all">{t.sub}</div>}
           </div>
@@ -452,7 +452,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.0</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.1</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unranked
           </p>
@@ -667,7 +667,7 @@ export default function JobsPage() {
 
                 return (
                   <>
-                    <tr key={job.id} className={`group transition-colors ${rowBg}`}>
+                    <tr key={job.id} data-testid={`job-row-${job.id}`} data-wf={wf} className={`group transition-colors ${rowBg}`}>
                       {/* Checkbox */}
                       <td className={`px-2 py-2 text-center sticky left-0 z-10 ${sel ? 'bg-indigo-950' : 'bg-gray-900 group-hover:bg-gray-800'}`}>
                         <input type="checkbox" checked={sel} onChange={() => toggleSelect(job.id)} className="accent-indigo-500" />
@@ -744,25 +744,16 @@ export default function JobsPage() {
                             return <td key={col.key} className="px-2 py-1.5">
                               <div className="flex items-center gap-1">
                                 <select
+                                  data-testid={`status-select-${job.id}`}
                                   value={wf}
                                   onChange={e => setWorkflow(job.id, e.target.value, e.target.value === 'applied' ? job.url : undefined)}
-                                  className={`flex-1 rounded px-1.5 py-0.5 text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 ${WF_STYLE[wf]}`}
+                                  className={`w-full rounded px-1.5 py-0.5 text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 ${WF_STYLE[wf]}`}
                                 >
                                   <option value="open">Open</option>
                                   <option value="generated">Generated</option>
                                   <option value="applied">Applied</option>
                                   <option value="discarded">Discarded</option>
                                 </select>
-                                {wf === 'open' && (
-                                  <button
-                                    onClick={() => handleGenerate(job.id)}
-                                    disabled={generating === job.id}
-                                    title="Generate Resume & Cover Letter"
-                                    className="px-1.5 py-0.5 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs rounded whitespace-nowrap"
-                                  >
-                                    {generating === job.id ? '⚙️…' : '📄 Gen'}
-                                  </button>
-                                )}
                               </div>
                             </td>
 

@@ -132,3 +132,21 @@ npx supabase db push      # apply migrations
 ## Document Source of Truth
 
 The nine markdown files in `/docs/` (PRODUCT_REQUIREMENTS.md, USER_FLOW.md, DATABASE_SCHEMA.md, JOB_RANKING_RULES.md, RESUME_AND_COVER_LETTER_GENERATION_RULES.md, APIFY_IMPORT_SPEC.md, GOOGLE_DRIVE_STORAGE_SPEC.md, MVP_BUILD_PLAN.md, CLAUDE.md) are the source of truth. If implementation diverges, update the docs first, then code.
+
+## Testing Requirements
+
+### Definition of Done
+A task that changes `src/lib/` or any API route is NOT done until:
+- `npm run test:all` passes (exit 0)
+- No tests are `.skip`ped without a comment
+- No test was deleted to make CI pass
+
+### When to write tests
+- Only write tests when the user asks: "write tests for scenario N"
+- Do not write speculative tests for code you touched incidentally
+- See `docs/TEST_SCENARIOS.md` for the scenario list
+- See `docs/TESTING_STRATEGY.md` for test pyramid, fixture rules, and commands
+
+### Fix code, not tests
+If a test fails after a code change, fix the code. Only change the test if the
+expectation is provably wrong — add a comment explaining why.

@@ -475,7 +475,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.7</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.8</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unscored
           </p>
@@ -492,6 +492,14 @@ export default function JobsPage() {
               <button onClick={() => bulkWorkflow('applied')}   className="px-3 py-1.5 bg-green-800 hover:bg-green-700 text-white text-xs rounded-lg">✓ Apply</button>
               <button onClick={() => bulkWorkflow('discarded')} className="px-3 py-1.5 bg-red-900 hover:bg-red-800 text-white text-xs rounded-lg">✗ Discard</button>
               <button onClick={() => bulkWorkflow('open')}      className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg">↺ Re-open</button>
+              <button onClick={async () => {
+                if (!confirm(`Delete ${selected.size} job${selected.size > 1 ? 's' : ''}? This cannot be undone.`)) return
+                for (const id of selected) {
+                  await fetch('/api/jobs', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+                }
+                setSelected(new Set())
+                loadJobs()
+              }} className="px-3 py-1.5 bg-red-950 hover:bg-red-900 text-red-400 text-xs rounded-lg">🗑 Delete</button>
             </>
           )}
           {/* Category dropdown — required to enable Job-fit Score */}
@@ -838,20 +846,12 @@ export default function JobsPage() {
                         }
                       })}
 
-                      {/* Row actions: expand + delete */}
+                      {/* Expand toggle */}
                       <td className="px-1 py-2 text-center">
-                        <div className="flex items-center gap-0.5">
-                          <button onClick={() => setExpanded(exp ? null : job.id)}
-                            className="text-gray-500 hover:text-gray-300 text-xs w-6 h-6 flex items-center justify-center rounded hover:bg-gray-700">
-                            {exp ? '▲' : '▼'}
-                          </button>
-                          <button
-                            onClick={() => handleDeleteJob(job.id)}
-                            title="Delete job"
-                            className="text-gray-700 hover:text-red-400 text-xs w-6 h-6 flex items-center justify-center rounded hover:bg-gray-800 opacity-0 group-hover:opacity-100 transition-opacity">
-                            🗑
-                          </button>
-                        </div>
+                        <button onClick={() => setExpanded(exp ? null : job.id)}
+                          className="text-gray-500 hover:text-gray-300 text-xs w-6 h-6 flex items-center justify-center rounded hover:bg-gray-700">
+                          {exp ? '▲' : '▼'}
+                        </button>
                       </td>
                     </tr>
 

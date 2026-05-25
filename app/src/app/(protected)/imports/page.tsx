@@ -151,22 +151,24 @@ export default function ImportsPage() {
   const KeywordCheckboxList = ({
     sets, selectedIds, onChange, emptyHref, emptyLabel,
   }: { sets: KeywordSet[]; selectedIds: string[]; onChange: (id: string, checked: boolean) => void; emptyHref: string; emptyLabel: string }) => (
-    <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 max-h-36 overflow-y-auto space-y-1.5">
+    <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 max-h-56 overflow-y-auto space-y-2.5">
       {sets.length === 0 ? (
         <p className="text-gray-600 text-xs">
           No sets yet — <Link href={emptyHref} className="text-indigo-400">{emptyLabel}</Link>.
         </p>
       ) : sets.map(set => (
-        <label key={set.id} className="flex items-center gap-2 cursor-pointer">
+        <label key={set.id} className="flex items-start gap-2 cursor-pointer py-0.5">
           <input
             type="checkbox"
             checked={selectedIds.includes(set.id)}
             disabled={triggering}
             onChange={e => onChange(set.id, e.target.checked)}
-            className="w-3.5 h-3.5 accent-indigo-500"
+            className="w-3.5 h-3.5 accent-indigo-500 mt-0.5 shrink-0"
           />
-          <span className="text-white text-sm">{set.name}</span>
-          <span className="text-gray-600 text-xs">({set.keywords?.length || 0} terms)</span>
+          <div>
+            <span className="text-white text-sm">{set.name}</span>
+            <p className="text-gray-500 text-xs mt-0.5 leading-relaxed">{set.keywords?.join(', ') || '—'}</p>
+          </div>
         </label>
       ))}
     </div>

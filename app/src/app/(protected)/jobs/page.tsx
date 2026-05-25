@@ -413,9 +413,27 @@ export default function JobsPage() {
       const a = document.createElement('a')
       a.href = url; a.download = filename; a.click()
       URL.revokeObjectURL(url)
-      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'documents_generated' } : j))
+      // Read ATS score from response headers and update local state immediately
+      const atsScore   = res.headers.get('X-ATS-Score')
+      const atsVerdict = res.headers.get('X-ATS-Verdict') ?? undefined
+      const atsMatched = res.headers.get('X-ATS-Matched')?.split('|').filter(Boolean) ?? []
+      const atsMissing = res.headers.get('X-ATS-Missing')?.split('|').filter(Boolean) ?? []
+      setJobs(prev => prev.map(j => j.id === jobId ? {
+        ...j,
+        status: 'documents_generated',
+        ai_ranking: {
+          ...j.ai_ranking,
+          ...(atsScore ? {
+            ats_score:            Number(atsScore),
+            ats_verdict:          atsVerdict,
+            ats_matched_keywords: atsMatched,
+            ats_missing_keywords: atsMissing,
+          } : {}),
+        },
+      } : j))
       setCounts(prev => ({ ...prev, open: Math.max(0, prev.open - 1), generated: prev.generated + 1 }))
-      toast('success', `✓ Documents ready — saved to Downloads`, `${filename}  ·  Resume.docx / Cover_Letter.docx`)
+      const atsLabel = atsScore ? `  ·  ATS ${atsScore}/100` : ''
+      toast('success', `✓ Documents ready${atsLabel}`, `${filename}  ·  Resume + Cover Letter`)
       return true
     } catch (err) {
       toast('error', 'Generation error', err instanceof Error ? err.message : String(err))
@@ -459,7 +477,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.4</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.5</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unranked
           </p>

@@ -62,7 +62,7 @@ export default function Sidebar({ user }: { user: User }) {
           <span>🚪</span>
           <span>Sign out</span>
         </button>
-        <p className="text-center text-gray-600 text-xs">v0.6.4 — 2026-05-24</p>
+        <p className="text-center text-gray-600 text-xs">v0.6.5 — 2026-05-25</p>
       </div>
     </aside>
   )

@@ -99,17 +99,19 @@ STRICT RULES:
 
 Respond with valid JSON only — no markdown, no explanation.`
 
-const COVER_LETTER_SYSTEM_PROMPT = `You are writing a professional cover letter for a job application.
+const COVER_LETTER_SYSTEM_PROMPT = `You are writing a professional first-person cover letter for a job application.
 
 STRICT RULES:
-1. Only reference real experience from the provided profile
-2. 3-4 body paragraphs only
-3. First paragraph: state the role and why she's applying
-4. Middle paragraphs: connect specific experience to this job's requirements
-5. Final paragraph: availability, rights, enthusiasm, call to action
-6. Professional but warm, genuine tone — not generic
-7. Never mention qualifications she doesn't have
-8. Keep each paragraph to 4-6 sentences max
+1. Write in first person ("I") throughout — never refer to the candidate as "she" or in third person
+2. Only reference real experience from the provided profile — never invent
+3. Exactly 4 body paragraphs:
+   - Paragraph 1 (2-3 sentences): State the specific role being applied for and why genuinely interested
+   - Paragraph 2 (4-5 sentences): Most relevant current/recent experience — specific examples matching the job
+   - Paragraph 3 (4-5 sentences): Additional transferable skills or experience that strengthen the application
+   - Paragraph 4 (3-4 sentences): Availability, work rights, enthusiasm, specific call to action
+4. Professional but warm and genuine tone — not generic, not formulaic
+5. Never mention qualifications or certifications the candidate does not hold
+6. Each paragraph must add distinct value — no repetition between paragraphs
 
 Respond with valid JSON only — no markdown, no explanation.`
 
@@ -121,18 +123,20 @@ export async function generateResumeData(
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
   const contact = (profile.contact ?? {}) as Record<string, string>
+  // Only include LinkedIn if it looks like a real URL/profile (not placeholder text)
+  const rawLinkedin = contact.linkedin ?? ''
   const candidate: CandidateContact = {
     name:     contact.name     ?? 'Priyadharshini Selvam',
     location: contact.location ?? '',
     phone:    contact.phone    ?? '',
     email:    contact.email    ?? '',
-    linkedin: contact.linkedin,
+    linkedin: (rawLinkedin.includes('linkedin') || rawLinkedin.startsWith('http')) ? rawLinkedin : undefined,
   }
 
   const experienceCount = Array.isArray(profile.experience) ? (profile.experience as unknown[]).length : '?'
 
   const schema = `{
-  "summary": "3-4 sentence tailored summary. Sentence 1: candidate type + breadth of experience. Sentence 2: most relevant current role. Sentence 3: strongest transferable skills. Sentence 4: eligibility/availability/commitment.",
+  "summary": "3-4 sentence tailored summary. Sentence 1: describe the candidate by their CURRENT background/experience (NOT the role they are applying for). Sentence 2: most relevant current or recent role. Sentence 3: strongest transferable skills for this job. Sentence 4: eligibility/availability/commitment.",
   "key_skills": ["up to 12 most relevant skills from profile"],
   "experience": [
     /* MUST contain exactly ${experienceCount} entries — one per role in the profile. Do NOT drop any. */
@@ -195,7 +199,10 @@ Return valid JSON only.`
       company:  String(e.company ?? ''),
       period:   String(e.period ?? ''),
       location: String(e.location ?? ''),
-      bullets:  Array.isArray(e.bullets) ? e.bullets.map(String) : [],
+      // Strip any leading "- " or "• " the AI may have added (renderer adds its own prefix)
+      bullets:  Array.isArray(e.bullets)
+        ? e.bullets.map(b => String(b).replace(/^[-•]\s+/, '').trim())
+        : [],
     })),
     education:        (raw.education ?? []).map((e: Record<string, unknown>) => ({
       degree:      String(e.degree ?? ''),
@@ -218,12 +225,13 @@ export async function generateCoverLetterData(
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
   const contact = (profile.contact ?? {}) as Record<string, string>
+  const rawLinkedin2 = contact.linkedin ?? ''
   const candidate: CandidateContact = {
     name:     contact.name     ?? 'Priyadharshini Selvam',
     location: contact.location ?? '',
     phone:    contact.phone    ?? '',
     email:    contact.email    ?? '',
-    linkedin: contact.linkedin,
+    linkedin: (rawLinkedin2.includes('linkedin') || rawLinkedin2.startsWith('http')) ? rawLinkedin2 : undefined,
   }
 
   const today = new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -233,7 +241,7 @@ export async function generateCoverLetterData(
   "company": "company/organisation name",
   "address": "City, State",
   "salutation": "Dear Recruitment Team,",
-  "paragraphs": ["paragraph 1 text", "paragraph 2 text", "paragraph 3 text"],
+  "paragraphs": ["paragraph 1 — role + genuine interest", "paragraph 2 — most relevant experience with specifics", "paragraph 3 — additional transferable skills", "paragraph 4 — availability, rights, call to action"],
   "closing": "Kind regards,"
 }`
 

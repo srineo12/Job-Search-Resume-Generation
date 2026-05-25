@@ -98,7 +98,11 @@ export async function buildResumeDocx(data: ResumeData): Promise<Buffer> {
     // ── Education ──
     sectionHeader('Education'),
     ...data.education.flatMap(ed => [
-      bold(`${ed.degree} | ${ed.institution} | ${ed.location} | ${ed.period}`),
+      new Paragraph({
+        children: [new TextRun({ text: ed.degree, bold: true, size: 19, font: FONT, color: COLOR_BLACK })],
+        spacing: { before: 120, after: 20 },
+      }),
+      subLine(`${ed.institution} | ${ed.location} | ${ed.period}`),
       ...(ed.achievement ? [bullet(ed.achievement)] : []),
     ]),
 

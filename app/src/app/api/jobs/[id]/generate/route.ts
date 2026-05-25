@@ -7,12 +7,13 @@ import { buildResumeDocx } from '@/lib/render/resume-docx'
 import { buildCoverLetterDocx } from '@/lib/render/cover-letter-docx'
 import JSZip from 'jszip'
 
-function slugify(text: string): string {
+function slugify(text: string, limit = 22): string {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
-    .slice(0, 40)
+    .slice(0, limit)
+    .replace(/_+$/g, '') // remove trailing underscores from the slice
 }
 
 export async function POST(
@@ -93,12 +94,13 @@ export async function POST(
   }
 
   // ── 6. Package as ZIP ──
+  // Format: {title}_{employer}_{jobId} — title first so it's readable at a glance
   const candidateName = resumeData.candidate.name.replace(/\s+/g, '_')
-  const employerSlug  = slugify(job.employer ?? 'Employer')
-  const titleSlug     = slugify(job.title ?? 'Role')
+  const titleSlug     = slugify(job.title    ?? 'Role',     22)
+  const employerSlug  = slugify(job.employer ?? 'Employer', 22)
   const jobIdPrefix   = (job.source_job_id ?? jobId).slice(0, 8)
-  const folderName    = `${employerSlug}_${titleSlug}_${jobIdPrefix}`
-  const filePrefix    = `${candidateName}_${employerSlug}_${titleSlug}`
+  const folderName    = `${titleSlug}_${employerSlug}_${jobIdPrefix}`
+  const filePrefix    = `${candidateName}_${titleSlug}_${employerSlug}`
 
   const zip = new JSZip()
   const folder = zip.folder(folderName)!
@@ -127,13 +129,19 @@ export async function POST(
     .eq('id', jobId)
     .eq('user_id', user.id)
 
-  // ── 8. Return ZIP ──
+  // ── 8. Return ZIP (ATS score in headers for immediate UI display) ──
   return new NextResponse(zipBuffer as unknown as BodyInit, {
     status: 200,
     headers: {
       'Content-Type':        'application/zip',
       'Content-Disposition': `attachment; filename="${folderName}.zip"`,
       'Content-Length':      String(zipBuffer.length),
+      ...(atsResult ? {
+        'X-ATS-Score':   String(atsResult.score),
+        'X-ATS-Verdict': atsResult.verdict,
+        'X-ATS-Matched': atsResult.matched_keywords.join('|'),
+        'X-ATS-Missing': atsResult.missing_keywords.join('|'),
+      } : {}),
     },
   })
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-type KeywordSet = { id: string; name: string; keywords: string[]; set_type: string; is_active: boolean; created_at: string }
+type KeywordSet = { id: string; name: string; keywords: string[]; set_type: string; is_active: boolean; created_at: string; jobfit_prompt?: string }
 
 function SetSection({
   title, description, setType, accentClass,
@@ -12,6 +12,7 @@ function SetSection({
   const [newKeywords, setNewKeywords] = useState('')
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<KeywordSet | null>(null)
+  const [expanded, setExpanded] = useState<string | null>(null)
 
   async function load() {
     const res = await fetch(`/api/settings/keywords?set_type=${setType}`)
@@ -121,17 +122,40 @@ function SetSection({
                 </div>
               </div>
             ) : (
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-white font-medium text-sm">{s.name}</p>
-                  <p className="text-gray-500 text-xs mt-1 leading-relaxed">
-                    {s.keywords.join(', ')}
-                  </p>
-                </div>
-                <div className="flex gap-3">
-                  <button onClick={() => setEditing(s)} className="text-xs text-indigo-400 hover:text-indigo-300">Edit</button>
-                  <button onClick={() => handleDelete(s.id)} className="text-xs text-red-400 hover:text-red-300">Delete</button>
-                </div>
+              <div>
+                {/* Header row — click to expand/collapse */}
+                <button
+                  onClick={() => setExpanded(expanded === s.id ? null : s.id)}
+                  className="w-full flex items-start justify-between text-left"
+                >
+                  <div>
+                    <p className="text-white font-medium text-sm">{s.name}</p>
+                    <p className="text-gray-500 text-xs mt-1 leading-relaxed">{s.keywords.join(', ')}</p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0 ml-3">
+                    <span className="text-gray-600 text-xs">{expanded === s.id ? '▲' : '▼'}</span>
+                  </div>
+                </button>
+
+                {/* Expanded: job-fit prompt + edit/delete */}
+                {expanded === s.id && (
+                  <div className="mt-3 pt-3 border-t border-gray-800 space-y-3">
+                    <div>
+                      <p className="text-xs font-medium text-gray-400 mb-1.5">⚡ Saved Job-fit Prompt</p>
+                      {s.jobfit_prompt ? (
+                        <pre className="text-xs text-gray-300 bg-gray-950 border border-gray-700 rounded-lg p-3 whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto">
+                          {s.jobfit_prompt}
+                        </pre>
+                      ) : (
+                        <p className="text-gray-600 text-xs italic">No prompt generated yet — run Job-fit Score on the Jobs page to generate one.</p>
+                      )}
+                    </div>
+                    <div className="flex gap-3">
+                      <button onClick={() => setEditing(s)} className="text-xs text-indigo-400 hover:text-indigo-300">Edit</button>
+                      <button onClick={() => handleDelete(s.id)} className="text-xs text-red-400 hover:text-red-300">Delete</button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

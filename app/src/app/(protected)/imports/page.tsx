@@ -31,7 +31,6 @@ const DATE_RANGES = [
 export default function ImportsPage() {
   const [imports, setImports] = useState<Import[]>([])
   const [searchSets, setSearchSets] = useState<KeywordSet[]>([])
-  const [titleSets, setTitleSets] = useState<KeywordSet[]>([])
   const [triggering, setTriggering] = useState(false)
   const [refreshing, setRefreshing] = useState<string | null>(null)
   const [autoRanking, setAutoRanking] = useState(false)
@@ -41,7 +40,6 @@ export default function ImportsPage() {
   const [form, setForm] = useState({
     source: 'seek' as 'seek' | 'indeed',
     keyword_set_ids: [] as string[],
-    title_set_ids: [] as string[],
     date_range: '30d',
     max_items: 10,
   })
@@ -54,13 +52,9 @@ export default function ImportsPage() {
   }, [])
 
   async function loadKeywordSets() {
-    const [searchRes, titleRes] = await Promise.all([
-      fetch('/api/settings/keywords?set_type=search'),
-      fetch('/api/settings/keywords?set_type=title'),
-    ])
-    const [searchData, titleData] = await Promise.all([searchRes.json(), titleRes.json()])
-    setSearchSets(searchData.keyword_sets || [])
-    setTitleSets(titleData.keyword_sets || [])
+    const res = await fetch('/api/settings/keywords?set_type=search')
+    const data = await res.json()
+    setSearchSets(data.keyword_sets || [])
   }
 
   async function loadImports() {
@@ -75,9 +69,9 @@ export default function ImportsPage() {
     setError('')
     setSuccess('')
     try {
-      // Collect include_in_title terms from selected title sets
-      const selectedTitleSets = titleSets.filter(s => form.title_set_ids.includes(s.id))
-      const include_in_title = selectedTitleSets.flatMap(s => s.keywords)
+      // Search terms double as title filters — no separate selection needed
+      const selectedSearchSets = searchSets.filter(s => form.keyword_set_ids.includes(s.id))
+      const include_in_title = selectedSearchSets.flatMap(s => s.keywords)
 
       const res = await fetch('/api/imports', {
         method: 'POST',
@@ -93,7 +87,7 @@ export default function ImportsPage() {
       const d = await res.json()
       if (!res.ok) { setError(d.error || 'Failed'); return }
       setSuccess(`Import queued! Apify run: ${d.import.apify_run_id}`)
-      setForm(f => ({ ...f, keyword_set_ids: [], title_set_ids: [] }))
+      setForm(f => ({ ...f, keyword_set_ids: [] }))
       loadImports()
     } catch (err) {
       setError(String(err))
@@ -233,23 +227,6 @@ export default function ImportsPage() {
               }))}
               emptyHref="/settings/keywords"
               emptyLabel="create one in Keyword Sets"
-            />
-          </div>
-
-          {/* Title Filters */}
-          <div>
-            <label className="text-xs text-gray-500 mb-1.5 block">
-              Title Filters <span className="text-gray-600">(at least one term must appear in the job title)</span>
-            </label>
-            <KeywordCheckboxList
-              sets={titleSets}
-              selectedIds={form.title_set_ids}
-              onChange={(id, checked) => setForm(f => ({
-                ...f,
-                title_set_ids: checked ? [...f.title_set_ids, id] : f.title_set_ids.filter(x => x !== id),
-              }))}
-              emptyHref="/settings/keywords"
-              emptyLabel="create a Title Filter set in Keyword Sets"
             />
           </div>
 

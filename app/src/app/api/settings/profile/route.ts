@@ -22,7 +22,10 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await supabase
     .from('candidate_profile')
-    .upsert({ user_id: user.id, profile_json: body.profile_json, updated_at: new Date().toISOString() })
+    .upsert(
+      { user_id: user.id, profile_json: body.profile_json, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    )
     .select()
     .single()
 

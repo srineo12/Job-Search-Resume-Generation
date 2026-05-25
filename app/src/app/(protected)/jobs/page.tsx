@@ -41,6 +41,7 @@ interface Job {
     ats_missing_keywords?: string[]
   } | null
   ai_ranked_at: string | null
+  created_at: string
   category: string
   description_text: string | null
   description_html: string | null
@@ -101,7 +102,6 @@ interface ColDef {
 
 const ALL_COLS: ColDef[] = [
   { key: 'source_job_id',     label: 'Job ID',      defaultWidth: 90,  sortable: true,  filterable: true,  filterType: 'text' },
-  { key: 'category',          label: 'Category',    defaultWidth: 130, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
   { key: 'title',             label: 'Job Title',   defaultWidth: 230, sortable: true,  filterable: true,  filterType: 'text', sticky: true },
   { key: 'employer',          label: 'Employer',    defaultWidth: 140, sortable: true,  filterable: true,  filterType: 'text' },
   { key: 'location',          label: 'Location',    defaultWidth: 160, sortable: true,  filterable: true,  filterType: 'text' },
@@ -116,9 +116,11 @@ const ALL_COLS: ColDef[] = [
   { key: 'arrangement',       label: 'Arrangement', defaultWidth: 115, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
   { key: 'applicants',        label: 'Applicants',  defaultWidth: 90,  sortable: true,  filterable: false, filterType: 'text' },
   { key: 'posted_at',         label: 'Posted',      defaultWidth: 80,  sortable: true,  filterable: false, filterType: 'text' },
+  { key: 'imported_at',       label: 'Fetched',     defaultWidth: 80,  sortable: true,  filterable: false, filterType: 'text' },
+  { key: 'category',          label: 'Category',    defaultWidth: 130, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
 ]
 
-const LS_KEY = 'jobs-col-layout-v2'
+const LS_KEY = 'jobs-col-layout-v3'
 
 function loadLayout() {
   if (typeof window === 'undefined') return null
@@ -215,6 +217,13 @@ export default function JobsPage() {
       .then(d => setKeywordSets(d.keyword_sets ?? []))
       .catch(() => {})
   }, [])
+
+  // Global cursor: wait while any long operation is running
+  const isBusy = scoring || !!generating
+  useEffect(() => {
+    document.body.style.cursor = isBusy ? 'wait' : 'default'
+    return () => { document.body.style.cursor = 'default' }
+  }, [isBusy])
 
   // ── Filter + sort pipeline ────────────────────────────────────────────────
   const visible = jobs
@@ -466,7 +475,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.6</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.7</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unscored
           </p>
@@ -477,7 +486,9 @@ export default function JobsPage() {
           {selected.size > 0 && (
             <>
               <span className="text-gray-500 text-xs">{selected.size} selected:</span>
-              <button onClick={() => bulkWorkflow('generated')} className="px-3 py-1.5 bg-blue-800 hover:bg-blue-700 text-white text-xs rounded-lg">📄 Generate</button>
+              <button onClick={() => bulkWorkflow('generated')} disabled={!!generating} className="px-3 py-1.5 bg-blue-800 hover:bg-blue-700 disabled:opacity-60 text-white text-xs rounded-lg flex items-center gap-1.5">
+                {generating ? <><span className="animate-spin inline-block">⚙</span> Generating…</> : <>📄 Generate</>}
+              </button>
               <button onClick={() => bulkWorkflow('applied')}   className="px-3 py-1.5 bg-green-800 hover:bg-green-700 text-white text-xs rounded-lg">✓ Apply</button>
               <button onClick={() => bulkWorkflow('discarded')} className="px-3 py-1.5 bg-red-900 hover:bg-red-800 text-white text-xs rounded-lg">✗ Discard</button>
               <button onClick={() => bulkWorkflow('open')}      className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg">↺ Re-open</button>
@@ -819,17 +830,28 @@ export default function JobsPage() {
                           case 'posted_at':
                             return <td key={col.key} className="px-2 py-2 text-white">{relDate(job.posted_at)}</td>
 
+                          case 'imported_at':
+                            return <td key={col.key} className="px-2 py-2 text-white">{relDate(job.created_at)}</td>
+
                           default:
                             return <td key={col.key} className="px-2 py-2 text-gray-600">—</td>
                         }
                       })}
 
-                      {/* Expand toggle */}
+                      {/* Row actions: expand + delete */}
                       <td className="px-1 py-2 text-center">
-                        <button onClick={() => setExpanded(exp ? null : job.id)}
-                          className="text-gray-500 hover:text-gray-300 text-xs w-6 h-6 flex items-center justify-center rounded hover:bg-gray-700">
-                          {exp ? '▲' : '▼'}
-                        </button>
+                        <div className="flex items-center gap-0.5">
+                          <button onClick={() => setExpanded(exp ? null : job.id)}
+                            className="text-gray-500 hover:text-gray-300 text-xs w-6 h-6 flex items-center justify-center rounded hover:bg-gray-700">
+                            {exp ? '▲' : '▼'}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteJob(job.id)}
+                            title="Delete job"
+                            className="text-gray-700 hover:text-red-400 text-xs w-6 h-6 flex items-center justify-center rounded hover:bg-gray-800 opacity-0 group-hover:opacity-100 transition-opacity">
+                            🗑
+                          </button>
+                        </div>
                       </td>
                     </tr>
 

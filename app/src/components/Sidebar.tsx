@@ -13,7 +13,6 @@ const navItems = [
 
 const settingsItems = [
   { href: '/settings/profile', label: 'Profile', icon: '👤' },
-  { href: '/settings/prompts', label: 'Prompts', icon: '✏️' },
   { href: '/settings/style', label: 'Style', icon: '🎨' },
   { href: '/settings/keywords', label: 'Keyword Sets', icon: '🔑' },
   { href: '/settings/actors', label: 'Apify Actors', icon: '🕷️' },
@@ -62,7 +61,7 @@ export default function Sidebar({ user }: { user: User }) {
           <span>🚪</span>
           <span>Sign out</span>
         </button>
-        <p className="text-center text-gray-600 text-xs">v0.6.6 — 2026-05-25</p>
+        <p className="text-center text-gray-600 text-xs">v0.6.7 — 2026-05-25</p>
       </div>
     </aside>
   )

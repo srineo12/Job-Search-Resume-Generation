@@ -364,29 +364,42 @@ export default function JobsPage() {
   }
 
   // ── Job-fit Score ─────────────────────────────────────────────────────────
-  // Requires a category (keyword set) to be selected before running.
-  // Calls the existing rank-batch API; dynamic prompt generation is wired in Phase 4.
+  // Requires a category (keyword set). Derives scoring prompt from profile
+  // programmatically — no extra AI call for prompt generation.
+  // Loops calling /api/jobs/jobfit until all unscored jobs are done.
   async function handleJobfitScore() {
     if (!selectedCategory) return
     setScoring(true); let total = 0
+    const jobIds = selected.size > 0 ? [...selected] : undefined // score selected, or all unscored
+    setScoreMsg(`Building scoring context from your profile…`)
+    // First call also saves the generated prompt to the keyword set
     while (true) {
       setScoreMsg(`Scoring… ${total} done`)
-      const res = await fetch('/api/jobs/rank-batch', {
+      const res = await fetch('/api/jobs/jobfit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: 5, keyword_set_id: selectedCategory }),
+        body: JSON.stringify({
+          keyword_set_id: selectedCategory,
+          ...(jobIds ? { job_ids: jobIds } : { limit: 5 }),
+        }),
       })
       const d = await res.json()
-      total += d.ranked || 0
-      if (!d.ranked || d.remaining === 0) {
+      if (!res.ok) { setScoreMsg(`⚠️ ${d.error ?? 'Scoring failed'}`); break }
+      total += d.scored || 0
+      if (!d.scored || d.remaining === 0) {
         if (d.errors > 0) setScoreMsg(`⚠️ ${d.message}`)
         break
       }
       setScoreMsg(`Scored ${total}… ${d.remaining} remaining`)
+      if (jobIds) break // specific job_ids — done after one call
     }
-    if (total > 0) setScoreMsg(`✓ ${total} jobs scored`)
-    loadJobs()
-    setTimeout(() => { setScoring(false); setScoreMsg('') }, 4000)
+    if (total > 0) {
+      setScoreMsg(`✓ ${total} job${total > 1 ? 's' : ''} scored`)
+      loadJobs()
+    } else if (total === 0) {
+      setScoreMsg('✓ All jobs already scored')
+    }
+    setTimeout(() => { setScoring(false); setScoreMsg('') }, 5000)
   }
 
   async function handleDeleteJob(id: string) {
@@ -475,7 +488,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.8</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.9</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unscored
           </p>

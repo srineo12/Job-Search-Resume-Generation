@@ -22,7 +22,6 @@ function buildSeekInput(
   keywords: string[],
   date_range: string,
   maxResults: number,
-  includeOneInTitle: string[]
 ): Record<string, unknown> {
   // Quote multi-word phrases so Seek's engine treats them as phrases, join with OR
   const searchTerm = keywords
@@ -45,10 +44,7 @@ function buildSeekInput(
     if (!isNaN(days)) input.dateRange = days
   }
 
-  if (includeOneInTitle.length > 0) {
-    // Actor requires an array (not a comma-separated string)
-    input.includeOneInTitle = includeOneInTitle
-  }
+  // Title filter removed — Apify returns all matches; job-fit scoring handles relevance
 
   return input
 }
@@ -96,7 +92,7 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
-  const { source, keyword_set_ids, include_in_title = [], date_range = '', max_items = 10 } = body
+  const { source, keyword_set_ids, date_range = '', max_items = 10 } = body
 
   if (!source || !['seek', 'indeed'].includes(source))
     return NextResponse.json({ error: 'Invalid source' }, { status: 400 })
@@ -121,12 +117,11 @@ export async function POST(request: NextRequest) {
   // Build Apify input — native fields for Seek, URL for Indeed
   let apifyInput: Record<string, unknown>
   if (source === 'seek') {
-    apifyInput = buildSeekInput(allKeywords, date_range, maxItemsCapped, include_in_title)
+    apifyInput = buildSeekInput(allKeywords, date_range, maxItemsCapped)
   } else {
     apifyInput = {
       url: buildIndeedUrl(allKeywords, date_range),
       maxResults: maxItemsCapped,
-      ...(include_in_title.length > 0 ? { includeOneInTitle: include_in_title } : {}),
     }
   }
 
@@ -157,8 +152,7 @@ export async function POST(request: NextRequest) {
     .insert({
       user_id: user.id, source, actor_id: actor.actor_id,
       keyword_set_ids,
-      // Store actual Apify input + title terms for display in UI
-      input_payload: { ...apifyInput, include_in_title },
+      input_payload: apifyInput,
       apify_run_id: apifyRunId, status: 'queued',
     })
     .select().single()

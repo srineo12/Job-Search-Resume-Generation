@@ -33,7 +33,7 @@ export default function ImportsPage() {
   const [searchSets, setSearchSets] = useState<KeywordSet[]>([])
   const [triggering, setTriggering] = useState(false)
   const [refreshing, setRefreshing] = useState<string | null>(null)
-  const [autoRanking, setAutoRanking] = useState(false)
+  const [autoRanking] = useState(false) // kept for JSX compat — auto-ranking removed
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [expandedImport, setExpandedImport] = useState<string | null>(null)
@@ -116,28 +116,13 @@ export default function ImportsPage() {
       if (!res.ok) { setError(d.error || 'Refresh failed'); return }
       loadImports()
 
-      // Auto-rank immediately after jobs are inserted
-      if (d.import?.status === 'succeeded' && (d.import?.stats?.inserted ?? 0) > 0) {
-        setSuccess(`✓ ${d.import.stats.inserted} jobs imported — ranking with AI now...`)
-        setAutoRanking(true)
-        try {
-          let total = 0
-          while (true) {
-            const rr = await fetch('/api/jobs/rank-batch', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ import_id: importId, limit: 20 }),
-            })
-            const rd = await rr.json()
-            total += rd.ranked || 0
-            if (!rd.ranked || rd.remaining === 0) break
-          }
-          setSuccess(`✓ ${d.import.stats.inserted} jobs imported and ${total} ranked. Go to Jobs →`)
-        } catch {
-          setSuccess(`✓ ${d.import.stats.inserted} jobs imported. Ranking failed — try "Rank All" in Jobs.`)
-        } finally {
-          setAutoRanking(false)
-        }
+      if (d.import?.status === 'succeeded') {
+        const inserted = d.import?.stats?.inserted ?? 0
+        setSuccess(
+          inserted > 0
+            ? `✓ ${inserted} new jobs imported. Go to Jobs → select a category → click Job-fit Score.`
+            : `✓ Import complete — ${d.import?.stats?.fetched ?? 0} fetched, all duplicates.`
+        )
       } else {
         setSuccess(d.message || `Status: ${d.import?.status}`)
       }

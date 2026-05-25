@@ -161,9 +161,12 @@ export default function JobsPage() {
   const [loading, setLoading]   = useState(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [ranking,    setRanking]    = useState(false)
-  const [rankMsg,    setRankMsg]    = useState('')
+  const [scoring,    setScoring]    = useState(false)
+  const [scoreMsg,   setScoreMsg]   = useState('')
   const [generating, setGenerating] = useState<string | null>(null)
+  // Category (keyword set) selector — required before running Job-fit Score
+  const [keywordSets,       setKeywordSets]       = useState<{ id: string; name: string; keywords: string[] }[]>([])
+  const [selectedCategory,  setSelectedCategory]  = useState<string>('')
 
   // Toast notifications
   const [toasts, setToasts] = useState<Array<{ id: number; type: 'success'|'error'|'info'; msg: string; sub?: string }>>([])
@@ -204,6 +207,14 @@ export default function JobsPage() {
   }, [])
 
   useEffect(() => { loadJobs() }, [loadJobs])
+
+  // Load keyword sets (search type only) for the category dropdown
+  useEffect(() => {
+    fetch('/api/settings/keywords?set_type=search')
+      .then(r => r.json())
+      .then(d => setKeywordSets(d.keyword_sets ?? []))
+      .catch(() => {})
+  }, [])
 
   // ── Filter + sort pipeline ────────────────────────────────────────────────
   const visible = jobs
@@ -343,52 +354,30 @@ export default function JobsPage() {
     setSelected(new Set())
   }
 
-  // ── Rank all ──────────────────────────────────────────────────────────────
-  async function handleRankAll(force = false) {
-    setRanking(true); let total = 0
-
-    if (force) {
-      // Re-rank: send jobs in batches of 3 so each API call finishes quickly
-      // and progress updates are visible
-      const allIds = jobs.map(j => j.id)
-      const BATCH = 3
-      for (let i = 0; i < allIds.length; i += BATCH) {
-        const batch = allIds.slice(i, i + BATCH)
-        setRankMsg(`Re-ranking… ${i}/${allIds.length}`)
-        const res = await fetch('/api/jobs/rank-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ job_ids: batch, force: true }),
-        })
-        const d = await res.json()
-        total += d.ranked || 0
-        if (d.errors > 0) {
-          setRankMsg(`⚠️ ${d.message}`)
-          await new Promise(r => setTimeout(r, 2000))
-        }
+  // ── Job-fit Score ─────────────────────────────────────────────────────────
+  // Requires a category (keyword set) to be selected before running.
+  // Calls the existing rank-batch API; dynamic prompt generation is wired in Phase 4.
+  async function handleJobfitScore() {
+    if (!selectedCategory) return
+    setScoring(true); let total = 0
+    while (true) {
+      setScoreMsg(`Scoring… ${total} done`)
+      const res = await fetch('/api/jobs/rank-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 5, keyword_set_id: selectedCategory }),
+      })
+      const d = await res.json()
+      total += d.ranked || 0
+      if (!d.ranked || d.remaining === 0) {
+        if (d.errors > 0) setScoreMsg(`⚠️ ${d.message}`)
+        break
       }
-      setRankMsg(`✓ Re-ranked ${total}/${allIds.length} jobs`)
-    } else {
-      while (true) {
-        setRankMsg(`Ranking… ${total} done`)
-        const res = await fetch('/api/jobs/rank-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ limit: 5 }),
-        })
-        const d = await res.json()
-        total += d.ranked || 0
-        if (!d.ranked || d.remaining === 0) {
-          if (d.errors > 0) setRankMsg(`⚠️ ${d.message}`)
-          break
-        }
-        setRankMsg(`Ranked ${total}… ${d.remaining} remaining`)
-      }
-      if (total > 0) setRankMsg(`✓ ${total} jobs ranked`)
+      setScoreMsg(`Scored ${total}… ${d.remaining} remaining`)
     }
-
+    if (total > 0) setScoreMsg(`✓ ${total} jobs scored`)
     loadJobs()
-    setTimeout(() => { setRanking(false); setRankMsg('') }, 4000)
+    setTimeout(() => { setScoring(false); setScoreMsg('') }, 4000)
   }
 
   async function handleDeleteJob(id: string) {
@@ -477,9 +466,9 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.5</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.6</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
-            {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unranked
+            {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unscored
           </p>
         </div>
 
@@ -494,14 +483,23 @@ export default function JobsPage() {
               <button onClick={() => bulkWorkflow('open')}      className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg">↺ Re-open</button>
             </>
           )}
-          <button onClick={() => handleRankAll(false)} disabled={ranking || counts.unranked === 0}
+          {/* Category dropdown — required to enable Job-fit Score */}
+          <select
+            value={selectedCategory}
+            onChange={e => setSelectedCategory(e.target.value)}
+            className="px-3 py-1.5 bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-500"
+          >
+            <option value="">Category…</option>
+            {keywordSets.map(ks => (
+              <option key={ks.id} value={ks.id}>{ks.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleJobfitScore}
+            disabled={scoring || !selectedCategory}
+            title={!selectedCategory ? 'Select a category first' : `Score unscored jobs in ${keywordSets.find(k => k.id === selectedCategory)?.name ?? 'selected category'}`}
             className="px-4 py-1.5 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white text-xs font-medium rounded-lg">
-            {ranking ? '⚙️ Ranking…' : `⚡ Rank All (${counts.unranked})`}
-          </button>
-          <button onClick={() => handleRankAll(true)} disabled={ranking}
-            title="Re-rank all jobs (including already ranked)"
-            className="px-3 py-1.5 bg-purple-900 hover:bg-purple-800 disabled:opacity-40 text-purple-300 text-xs font-medium rounded-lg">
-            ↺ Re-rank
+            {scoring ? '⚙️ Scoring…' : `⚡ Job-fit Score`}
           </button>
           <button onClick={handleSaveLayout}
             className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${layoutSaved ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
@@ -510,8 +508,8 @@ export default function JobsPage() {
         </div>
       </div>
 
-      {rankMsg && (
-        <div className="mb-3 p-2.5 bg-indigo-950 border border-indigo-800 rounded-lg text-indigo-300 text-xs">{rankMsg}</div>
+      {scoreMsg && (
+        <div className="mb-3 p-2.5 bg-indigo-950 border border-indigo-800 rounded-lg text-indigo-300 text-xs">{scoreMsg}</div>
       )}
 
       {/* ── Category filter ── */}

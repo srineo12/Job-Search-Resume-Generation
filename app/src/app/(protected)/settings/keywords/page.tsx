@@ -124,8 +124,8 @@ function SetSection({
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-white font-medium text-sm">{s.name}</p>
-                  <p className="text-gray-500 text-xs mt-1">
-                    {s.keywords.length} terms: {s.keywords.slice(0, 4).join(', ')}{s.keywords.length > 4 ? '…' : ''}
+                  <p className="text-gray-500 text-xs mt-1 leading-relaxed">
+                    {s.keywords.join(', ')}
                   </p>
                 </div>
                 <div className="flex gap-3">
@@ -146,23 +146,14 @@ export default function KeywordsPage() {
     <div className="max-w-3xl space-y-10">
       <div className="mb-2">
         <h1 className="text-2xl font-bold text-white">Keyword Sets</h1>
-        <p className="text-gray-400 text-sm mt-1">Manage search terms and title filters used when importing jobs.</p>
+        <p className="text-gray-400 text-sm mt-1">Search term categories used when importing jobs and selecting context for Job-fit Scoring.</p>
       </div>
 
       <SetSection
         title="Search Terms"
-        description="Keywords sent as the Apify search query — broad terms to find relevant jobs."
+        description="Keywords sent as the Apify search query. Each set is a category you select on the Jobs page before running Job-fit Score."
         setType="search"
         accentClass="bg-indigo-600 hover:bg-indigo-500"
-      />
-
-      <div className="border-t border-gray-800" />
-
-      <SetSection
-        title="Title Filters"
-        description="At least one of these must appear in the job title — filters out irrelevant results."
-        setType="title"
-        accentClass="bg-violet-600 hover:bg-violet-500"
       />
     </div>
   )

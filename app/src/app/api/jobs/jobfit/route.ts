@@ -29,13 +29,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'keyword_set_id is required' }, { status: 400 })
 
   // ── 1. Load keyword set (category) ──
-  const { data: kwSet } = await supabase
+  const { data: kwSet, error: kwErr } = await supabase
     .from('keyword_sets')
-    .select('id, name, keywords, jobfit_prompt')
+    .select('id, name, keywords')
     .eq('id', keyword_set_id)
     .eq('user_id', user.id)
     .single()
 
+  if (kwErr) {
+    console.error('keyword_sets query error:', kwErr.message)
+    return NextResponse.json({ error: `Keyword set lookup failed: ${kwErr.message}` }, { status: 500 })
+  }
   if (!kwSet)
     return NextResponse.json({ error: 'Keyword set not found' }, { status: 404 })
 

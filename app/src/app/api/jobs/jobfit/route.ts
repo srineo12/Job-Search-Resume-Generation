@@ -73,7 +73,18 @@ export async function POST(request: NextRequest) {
     .eq('user_id', user.id)
   if (promptSaveErr) console.warn('jobfit_prompt save skipped:', promptSaveErr.message)
 
-  // ── 4. Load jobs to score ──
+  // ── 4. Find imports that used this keyword set ──
+  // Only score jobs from imports associated with the selected category.
+  // This prevents scoring Teacher Aide jobs with SAP EWM criteria and vice versa.
+  const { data: matchingImports } = await supabase
+    .from('imports')
+    .select('id')
+    .eq('user_id', user.id)
+    .contains('keyword_set_ids', [keyword_set_id])
+
+  const importIds = (matchingImports ?? []).map(i => i.id as string)
+
+  // ── 5. Load jobs to score ──
   let query = supabase
     .from('jobs')
     .select('id, title, employer, location, work_type, salary_text, description_text, posted_at, status')
@@ -84,8 +95,9 @@ export async function POST(request: NextRequest) {
   if (job_ids?.length) {
     query = query.in('id', job_ids)
   } else {
-    // Score only unscored jobs
     query = query.is('ai_ranked_at', null)
+    // Scope to this category's imports if we found any
+    if (importIds.length > 0) query = query.in('import_id', importIds)
   }
 
   const { data: jobs, error: fetchErr } = await query
@@ -93,10 +105,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: fetchErr.message }, { status: 500 })
 
   if (!jobs?.length) {
-    const { count: remaining } = await supabase
+    // Count remaining scoped to this category
+    let remQuery = supabase
       .from('jobs').select('*', { count: 'exact', head: true })
       .eq('user_id', user.id).is('ai_ranked_at', null).neq('status', 'skipped')
-    return NextResponse.json({ scored: 0, remaining: remaining ?? 0, message: 'No unscored jobs found' })
+    if (importIds.length > 0) remQuery = remQuery.in('import_id', importIds)
+    const { count: remaining } = await remQuery
+    return NextResponse.json({ scored: 0, remaining: remaining ?? 0, message: 'No unscored jobs found for this category' })
   }
 
   // ── 5. Score each job ──
@@ -152,10 +167,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── 6. Count remaining unscored ──
-  const { count: remaining } = await supabase
+  // ── 7. Count remaining unscored in this category ──
+  let remQuery = supabase
     .from('jobs').select('*', { count: 'exact', head: true })
     .eq('user_id', user.id).is('ai_ranked_at', null).neq('status', 'skipped')
+  if (importIds.length > 0) remQuery = remQuery.in('import_id', importIds)
+  const { count: remaining } = await remQuery
 
   return NextResponse.json({
     scored,

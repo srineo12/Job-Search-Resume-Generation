@@ -22,10 +22,11 @@ interface Import {
 }
 
 const DATE_RANGES = [
-  { value: '', label: 'Any time' },
-  { value: '1d', label: 'Last 24 hours' },
-  { value: '7d', label: 'Last 7 days' },
+  { value: '1d',  label: 'Last 24 hrs' },
+  { value: '3d',  label: 'Last 3 days' },
+  { value: '7d',  label: 'Last 7 days' },
   { value: '30d', label: 'Last 30 days' },
+  { value: '',    label: 'Any time' },
 ]
 
 export default function ImportsPage() {
@@ -40,8 +41,8 @@ export default function ImportsPage() {
   const [form, setForm] = useState({
     source: 'seek' as 'seek' | 'indeed',
     keyword_set_ids: [] as string[],
-    date_range: '30d',
-    max_items: 10,
+    date_range: '3d',
+    max_items: 25,
   })
 
   useEffect(() => {
@@ -193,7 +194,7 @@ export default function ImportsPage() {
             </div>
             <div>
               <label className="text-xs text-gray-500 mb-1.5 block">Max Results</label>
-              <input type="number" value={form.max_items} min={10} max={500}
+              <input type="number" value={form.max_items} min={5} max={500}
                 onChange={e => setForm(f => ({ ...f, max_items: parseInt(e.target.value) || 100 }))}
                 disabled={triggering}
                 className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50" />

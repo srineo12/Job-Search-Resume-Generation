@@ -127,6 +127,7 @@ export async function generateResumeData(
   profile: Record<string, unknown>,
   job: { title: string; employer: string; location: string; description_text: string },
   customPrompt?: string,
+  framingNote?: string,
 ): Promise<ResumeData> {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -186,10 +187,15 @@ ${schema}
 
 Return valid JSON only.`
 
+  const basePrompt = customPrompt ?? RESUME_SYSTEM_PROMPT
+  const systemPrompt = framingNote
+    ? `${basePrompt}\n\nROLE-SPECIFIC FRAMING FOR THIS JOB:\n${framingNote}`
+    : basePrompt
+
   const completion = await openai.chat.completions.create({
     model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
     messages: [
-      { role: 'system', content: customPrompt ?? RESUME_SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: userMsg },
     ],
     response_format: { type: 'json_object' },
@@ -229,6 +235,7 @@ export async function generateCoverLetterData(
   profile: Record<string, unknown>,
   job: { title: string; employer: string; location: string; description_text: string },
   customPrompt?: string,
+  framingNote?: string,
 ): Promise<CoverLetterData> {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -270,10 +277,15 @@ ${schema}
 
 Return valid JSON only.`
 
+  const basePrompt2 = customPrompt ?? COVER_LETTER_SYSTEM_PROMPT
+  const systemPrompt2 = framingNote
+    ? `${basePrompt2}\n\nROLE-SPECIFIC FRAMING FOR THIS JOB:\n${framingNote}`
+    : basePrompt2
+
   const completion = await openai.chat.completions.create({
     model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
     messages: [
-      { role: 'system', content: customPrompt ?? COVER_LETTER_SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt2 },
       { role: 'user', content: userMsg },
     ],
     response_format: { type: 'json_object' },
@@ -295,35 +307,169 @@ Return valid JSON only.`
   }
 }
 
-// ─── Job-fit Scoring Prompt (programmatic, derived from profile) ──────────────
+// ─── Dynamic Prompt Generation ────────────────────────────────────────────────
 //
-// Scoring objective: "application worthiness" — not profile-to-job match.
-// A zero-experience role scores HIGH even if ATS match is low.
-// Built once per category, reused to score every job in that import batch.
+// Both job-fit scoring and resume/cover generation use AI-generated prompts
+// so they adapt automatically to different job categories and roles.
+// (No hardcoded education/childcare assumptions.)
 
-export function buildJobfitScoringPrompt(
+// ── Meta-prompt: generates a job-fit scoring prompt for a specific category ──
+
+const META_JOBFIT_PROMPT = `You are a job search strategist helping a career transitioner evaluate job listings.
+
+Your task: write a complete SCORING SYSTEM PROMPT for the AI model that will evaluate individual job listings.
+
+The prompt you write must:
+1. Be tailored to the SPECIFIC JOB CATEGORY provided — not generic assumptions
+   - If the category is admin/receptionist, focus on office, reception, customer service requirements
+   - If the category is childcare/education support, focus on WWCC, Cert III, classroom experience
+   - If the category is retail/hospitality, focus on customer service, cash handling, food safety
+   - Adapt hard disqualifiers and green flags to the ACTUAL category
+2. Define application worthiness as: "Should this candidate apply?" — NOT "does her resume match?"
+3. List 4-6 CATEGORY-SPECIFIC hard disqualifiers (mandatory licenses, registrations, minimum years for THIS category)
+4. List 4-6 CATEGORY-SPECIFIC green flags (entry-level indicators for THIS category)
+5. Include scoring bands: 90-100=HOT, 70-89=GOOD, 50-69=MAYBE, 30-49=MAYBE(stretch), 0-29=AVOID
+6. Reference the candidate's name, career background, and transferable strengths
+7. Specify the exact JSON response format for scoring each job
+
+Return ONLY the scoring system prompt text — no preamble, no explanation. Start with "You are scoring job listings..."`
+
+/**
+ * Generates a job-fit scoring prompt using AI.
+ * Called once per category scoring session; result is saved to keyword_sets.jobfit_prompt.
+ * Replaces the old hardcoded buildJobfitScoringPrompt function.
+ */
+export async function generateJobfitScoringPrompt(
   profile: Record<string, unknown>,
-  categoryName?: string,
-  categoryKeywords?: string[],
+  categoryName: string,
+  categoryKeywords: string[],
+): Promise<string> {
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+  const contact   = (profile.contact ?? {}) as Record<string, string>
+  const exp       = Array.isArray(profile.experience)      ? profile.experience      as Record<string, unknown>[] : []
+  const keySkills = Array.isArray(profile.key_skills)      ? profile.key_skills      as string[] : []
+  const certs     = String(profile.certifications ?? '')
+  const addInfo   = Array.isArray(profile.additional_info) ? profile.additional_info as string[] : []
+
+  const careerHistory = exp.map(e => `${e.role} at ${e.company}`).join(' → ')
+  const recentRole    = exp[0] ? `${exp[0].role} at ${exp[0].company}` : 'not specified'
+  const skills        = keySkills.slice(0, 12).join(', ')
+  const rights        = addInfo.join(' | ') || 'not specified'
+
+  const userMsg = `CANDIDATE PROFILE SUMMARY:
+- Name: ${contact.name || 'Candidate'}
+- Career path: ${careerHistory || recentRole}
+- Most recent role: ${recentRole}
+- Key skills: ${skills}
+- Certifications: ${certs || 'none listed'}
+- Work rights / availability: ${rights}
+
+TARGET CATEGORY: "${categoryName}"
+Category keywords: ${categoryKeywords.join(', ')}
+
+Write a scoring system prompt that correctly evaluates job listings in this specific category for this candidate.`
+
+  const completion = await openai.chat.completions.create({
+    model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
+    messages: [
+      { role: 'system', content: META_JOBFIT_PROMPT },
+      { role: 'user', content: userMsg },
+    ],
+    temperature: 0.3,
+  })
+
+  return completion.choices[0]?.message?.content?.trim() ?? _buildJobfitScoringPromptFallback(profile, categoryName, categoryKeywords)
+}
+
+// ── Meta-prompt: generates resume + cover letter framing for a specific job ──
+
+const META_DOCUMENT_FRAMING_PROMPT = `You are a resume strategist. Given a candidate profile and a specific job description, write brief role-specific framing instructions that will guide an AI to write a highly targeted resume and cover letter.
+
+Rules:
+- Be specific to THIS job category — admin, childcare, retail, healthcare, etc.
+- Identify which parts of the candidate's background to lead with for THIS role
+- Note any vocabulary, terminology, or framing that matches the employer's language
+- Keep each framing note concise (3-5 bullet points max)
+- Do NOT invent new experience — only guide framing of existing experience
+
+Return valid JSON only:
+{
+  "resume_framing": "3-5 bullet points as a single string. Which experience to emphasise, which skills to lead with, what keywords to weave in for THIS specific role.",
+  "cover_framing": "3-5 bullet points as a single string. What narrative angle to take, which experience to highlight in each paragraph, tone guidance for THIS specific employer/role."
+}`
+
+/**
+ * Generates job-specific framing notes for resume and cover letter.
+ * Called once per document generation; notes are appended to base prompts.
+ * Adds ~1 second but makes every document genuinely role-aware.
+ */
+export async function generateDocumentFraming(
+  profile: Record<string, unknown>,
+  job: { title: string; employer: string; description_text: string },
+): Promise<{ resumeFraming: string; coverFraming: string }> {
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+  const exp       = Array.isArray(profile.experience) ? profile.experience as Record<string, unknown>[] : []
+  const keySkills = Array.isArray(profile.key_skills) ? profile.key_skills as string[] : []
+  const certs     = String(profile.certifications ?? '')
+
+  const profileSummary = [
+    `Recent roles: ${exp.slice(0, 3).map(e => `${e.role} at ${e.company}`).join(', ')}`,
+    `Key skills: ${keySkills.slice(0, 10).join(', ')}`,
+    `Certifications: ${certs || 'none'}`,
+  ].join('\n')
+
+  const userMsg = `JOB:
+Title: ${job.title}
+Employer: ${job.employer}
+Description (first 2000 chars):
+${(job.description_text ?? '').slice(0, 2000)}
+
+CANDIDATE SUMMARY:
+${profileSummary}
+
+Write framing instructions for tailoring resume and cover letter to this specific role.`
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: META_DOCUMENT_FRAMING_PROMPT },
+        { role: 'user', content: userMsg },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.3,
+    })
+
+    const raw = JSON.parse(completion.choices[0]?.message?.content ?? '{}')
+    return {
+      resumeFraming: String(raw.resume_framing ?? ''),
+      coverFraming:  String(raw.cover_framing  ?? ''),
+    }
+  } catch {
+    // Non-fatal — fall back to empty framing (base prompts still work)
+    return { resumeFraming: '', coverFraming: '' }
+  }
+}
+
+// ── Fallback: static prompt used if AI meta-call fails ──────────────────────
+
+function _buildJobfitScoringPromptFallback(
+  profile: Record<string, unknown>,
+  categoryName: string,
+  categoryKeywords: string[],
 ): string {
-  const contact  = (profile.contact ?? {}) as Record<string, string>
-  const exp      = Array.isArray(profile.experience)       ? profile.experience       as Record<string, unknown>[] : []
-  const keySkills = Array.isArray(profile.key_skills)      ? profile.key_skills       as string[] : []
-  const certs    = String(profile.certifications ?? '')
-  const addInfo  = Array.isArray(profile.additional_info)  ? profile.additional_info  as string[] : []
+  const contact   = (profile.contact ?? {}) as Record<string, string>
+  const exp       = Array.isArray(profile.experience)      ? profile.experience      as Record<string, unknown>[] : []
+  const keySkills = Array.isArray(profile.key_skills)      ? profile.key_skills      as string[] : []
+  const certs     = String(profile.certifications ?? '')
+  const addInfo   = Array.isArray(profile.additional_info) ? profile.additional_info as string[] : []
 
   const careerHistory = exp.map(e => `${e.role} at ${e.company}`).join(' → ')
   const recentRole    = exp[0] ? `${exp[0].role} at ${exp[0].company}` : 'see profile'
   const skills        = keySkills.slice(0, 10).join(', ')
   const rights        = addInfo.join(' | ') || 'see profile'
-
-  // Detect key certification flags from free text
-  const hasWWCC    = /working with children/i.test(certs)
-  const cert3Notes = certs.split(/[;|\n]/).filter(c => /cert.*(iii|3)/i.test(c)).map(c => c.trim()).join('; ')
-
-  const categoryLine = categoryName
-    ? `- Target category: "${categoryName}" (${(categoryKeywords ?? []).join(', ')})`
-    : '- Target category: entry-level support roles'
 
   return `You are scoring job listings to determine APPLICATION WORTHINESS for ${contact.name || 'this candidate'}.
 
@@ -336,52 +482,43 @@ CANDIDATE CONTEXT:
 - Name: ${contact.name || 'Candidate'}
 - Career path: ${careerHistory || recentRole}
 - Most recent role: ${recentRole}
-${categoryLine}
+- Target category: "${categoryName}" (${categoryKeywords.join(', ')})
 - Transferable strengths: ${skills || 'see profile'}
 - Certifications: ${certs || 'none listed'}
 - Rights / availability: ${rights}
 
-${hasWWCC ? '✓ Has Working With Children Check — do NOT flag this as a gap or barrier\n' : ''}\
-${cert3Notes ? `✓ Cert III status: ${cert3Notes} — factor this into qualification_risk\n` : ''}\
-
 SCORING BANDS:
-90-100 → HOT   Entry-level / traineeship / GTO / no experience required; duties suit transferable skills
-70-89  → GOOD  Experience preferred not mandatory; OR quals "desirable" not required; strong transferable case
-50-69  → MAYBE Stretch application — transferable case exists but is a reach; worth applying speculatively
+90-100 → HOT   Entry-level / no experience required; duties suit transferable skills
+70-89  → GOOD  Experience preferred not mandatory; strong transferable case
+50-69  → MAYBE Stretch — transferable case exists but is a reach
 30-49  → MAYBE Significant prior experience expected; unclear if open to career changers
 0-29   → AVOID Hard disqualifier present
 
 HARD DISQUALIFIERS → score ≤ 25, priority = avoid:
-• Mandatory professional registration that requires prior experience to hold (VIT, nursing licence, etc.)
-• "Must have N+ years experience in [field]" where candidate has none
-• Mandatory Cert III/IV/Diploma ALREADY HELD (not "will support you to obtain")
-• Qualified/registered teacher requirement
-• Mandatory ACECQA, early childhood director, or university degree in a specific field
-• Senior / manager / lead / head roles requiring staff management experience
+• Mandatory professional registration or licence candidate does not hold
+• "Must have N+ years experience" where candidate has none in that field
+• Mandatory qualification the candidate has not completed
+• Senior / manager / lead roles requiring team management experience
 
 GREEN FLAGS that boost score:
 • "No experience required" / "training provided" / "we will support you"
-• "Traineeship" / "GTO" / "earn while you learn" / "school-based traineeship"
-• Entry-level / junior / casual / fixed-term (low commitment to hire)
-• Duties match transferable skills: communication, admin, student supervision, mentoring
+• Traineeship / entry-level / junior / casual
+• Duties match transferable skills from career history
 
 Respond with valid JSON only — no markdown:
 {
   "priority": "hot|good|maybe|avoid",
   "score": <0-100>,
   "beginner_friendly": "yes|no|unclear",
-  "gto_traineeship": "yes|no|unclear",
   "training_offered": "yes|no|unclear",
-  "cert3_pathway": "yes|no|unclear",
-  "prior_school_required": "yes|no|unclear",
   "qualification_risk": "low|medium|high",
   "experience_risk": "low|medium|high",
   "recommended_action": "apply|review_carefully|skip",
-  "reason": "1-2 sentence explanation of the score — focus on entry accessibility",
-  "key_skills": "top 3 transferable skills that match this specific job",
+  "reason": "1-2 sentence explanation focused on entry accessibility",
+  "key_skills": "top 3 transferable skills matching this job",
   "red_flags": "specific disqualifying requirements found, or none",
-  "tailoring_notes": "one concrete tip for the cover letter or application",
-  "ranking_comments": ["entry accessibility assessment", "strongest matching factor", "main risk or confidence booster"],
-  "role_description": ["what this role actually involves day-to-day", "who they work with or support", "environment and setting"]
+  "tailoring_notes": "one concrete tip for the application",
+  "ranking_comments": ["entry accessibility assessment", "strongest matching factor", "main risk"],
+  "role_description": ["what this role involves day-to-day", "who they work with", "environment and setting"]
 }`
 }

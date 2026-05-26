@@ -2,7 +2,7 @@ export const runtime = 'nodejs'  // docx requires Node.js — not Edge
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
-import { generateResumeData, generateCoverLetterData, calculateAtsScore } from '@/lib/ai/generate-documents'
+import { generateResumeData, generateCoverLetterData, generateDocumentFraming, calculateAtsScore } from '@/lib/ai/generate-documents'
 import { buildResumeDocx } from '@/lib/render/resume-docx'
 import { buildCoverLetterDocx } from '@/lib/render/cover-letter-docx'
 import JSZip from 'jszip'
@@ -47,14 +47,6 @@ export async function POST(
   }
   const profile = profileRow.profile_json as Record<string, unknown>
 
-  // ── 3. Fetch active prompts (optional — fall back to defaults) ──
-  const [resumePromptRow, clPromptRow] = await Promise.all([
-    supabase.from('prompt_versions').select('content')
-      .eq('user_id', user.id).eq('prompt_type', 'resume_generation').eq('is_active', true).single(),
-    supabase.from('prompt_versions').select('content')
-      .eq('user_id', user.id).eq('prompt_type', 'cover_letter_generation').eq('is_active', true).single(),
-  ])
-
   const jobData = {
     title:            job.title ?? '',
     employer:         job.employer ?? '',
@@ -62,12 +54,16 @@ export async function POST(
     description_text: job.description_text ?? '',
   }
 
-  // ── 4. Generate structured content via AI ──
+  // ── 3. Generate role-specific framing + document content in parallel ──
+  // Step A: AI generates a brief framing note (which angle to take for THIS job category)
+  // Step B: AI generates resume + cover letter content using that framing
+  // Framing failure is non-fatal — documents still generate with base prompts.
   let resumeData, clData
   try {
+    const framing = await generateDocumentFraming(profile, jobData)
     ;[resumeData, clData] = await Promise.all([
-      generateResumeData(profile, jobData, resumePromptRow.data?.content),
-      generateCoverLetterData(profile, jobData, clPromptRow.data?.content),
+      generateResumeData(profile, jobData, undefined, framing.resumeFraming || undefined),
+      generateCoverLetterData(profile, jobData, undefined, framing.coverFraming || undefined),
     ])
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

@@ -2,7 +2,7 @@ export const runtime = 'nodejs'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
-import { buildJobfitScoringPrompt } from '@/lib/ai/generate-documents'
+import { generateJobfitScoringPrompt } from '@/lib/ai/generate-documents'
 import OpenAI from 'openai'
 
 /**
@@ -51,9 +51,9 @@ export async function POST(request: NextRequest) {
 
   const profile = profileRow.profile_json as Record<string, unknown>
 
-  // ── 3. Build scoring prompt from profile + category ──
+  // ── 3. Build scoring prompt from profile + category (AI-generated, category-specific) ──
   const categoryKeywords = Array.isArray(kwSet.keywords) ? kwSet.keywords as string[] : []
-  const scoringPrompt = buildJobfitScoringPrompt(profile, kwSet.name, categoryKeywords)
+  const scoringPrompt = await generateJobfitScoringPrompt(profile, kwSet.name, categoryKeywords)
 
   // Save prompt to keyword_sets for visibility on Keyword Sets page
   await supabase

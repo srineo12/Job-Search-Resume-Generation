@@ -246,6 +246,7 @@ export default function JobsPage() {
       if (colFilters.arrangement && (j.raw_payload?.workArrangements ?? '') !== colFilters.arrangement) return false
       if (colFilters.ai_priority && j.ai_priority !== colFilters.ai_priority) return false
       if (colFilters.workflow_status && wfOf(j.status) !== colFilters.workflow_status) return false
+      if (colFilters.category && j.category !== colFilters.category) return false
       if (colFilters.ats_score && (j.ai_ranking?.ats_score ?? 0) < parseInt(colFilters.ats_score)) return false
       if (scoreMin && (j.ai_score ?? 0) < parseInt(scoreMin)) return false
       return true
@@ -488,7 +489,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.6.9</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.7.0</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unscored
           </p>
@@ -544,78 +545,83 @@ export default function JobsPage() {
         <div className="mb-3 p-2.5 bg-indigo-950 border border-indigo-800 rounded-lg text-indigo-300 text-xs">{scoreMsg}</div>
       )}
 
-      {/* ── Category filter ── */}
-      {categories.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-2 items-center">
-          <span className="text-gray-600 text-xs">Category:</span>
-          <div className="flex gap-1 flex-wrap">
-            {categories.map(cat => {
-              const on = catFilters.has(cat)
+      {/* ── Category + Priority + Status filter bar ── */}
+      <div className="flex flex-col gap-2 mb-4">
+
+        {/* Category pills */}
+        {categories.length > 0 && (
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-gray-400 text-sm font-medium w-20 shrink-0">Category:</span>
+            <div className="flex gap-1.5 flex-wrap">
+              {categories.map(cat => {
+                const on = catFilters.has(cat)
+                return (
+                  <button key={cat}
+                    onClick={() => setCatFilters(s => { const n = new Set(s); n.has(cat) ? n.delete(cat) : n.add(cat); return n })}
+                    className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors border ${on ? 'bg-teal-700 border-teal-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white'}`}>
+                    {cat}
+                  </button>
+                )
+              })}
+              {catFilters.size > 0 && (
+                <button onClick={() => setCatFilters(new Set())} className="px-2 py-1.5 text-sm text-gray-500 hover:text-gray-300">✕ clear</button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Priority + Status in one row */}
+        <div className="flex flex-wrap gap-3 items-center">
+          {/* Priority multi-select */}
+          <span className="text-gray-400 text-sm font-medium w-20 shrink-0">Priority:</span>
+          <div className="flex gap-1.5 flex-wrap">
+            {([
+              { k:'hot',      l:`🔥 Hot (${counts.hot})` },
+              { k:'good',     l:`✅ Good (${counts.good})` },
+              { k:'maybe',    l:`🤔 Maybe (${counts.maybe})` },
+              { k:'avoid',    l:`❌ Avoid (${counts.avoid})` },
+              { k:'unranked', l:`⏳ Unranked (${counts.unranked})` },
+            ] as {k:string,l:string}[]).map(t => {
+              const on = priFilters.has(t.k)
               return (
-                <button key={cat}
-                  onClick={() => setCatFilters(s => { const n = new Set(s); n.has(cat) ? n.delete(cat) : n.add(cat); return n })}
-                  className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors border ${on ? 'bg-teal-700 border-teal-600 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-800'}`}>
-                  {cat}
+                <button key={t.k}
+                  onClick={() => setPriFilters(s => { const n = new Set(s); n.has(t.k) ? n.delete(t.k) : n.add(t.k); return n })}
+                  className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors border ${on ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white'}`}>
+                  {t.l}
                 </button>
               )
             })}
-            {catFilters.size > 0 && (
-              <button onClick={() => setCatFilters(new Set())} className="px-2 py-1 text-xs text-gray-500 hover:text-gray-300">✕</button>
+            {priFilters.size > 0 && (
+              <button onClick={() => setPriFilters(new Set())} className="px-2 py-1.5 text-sm text-gray-500 hover:text-gray-300">✕</button>
+            )}
+          </div>
+
+          <div className="w-px bg-gray-700 self-stretch" />
+
+          {/* Workflow status multi-select */}
+          <span className="text-gray-400 text-sm font-medium shrink-0">Status:</span>
+          <div className="flex gap-1.5 flex-wrap">
+            {([
+              { k:'open',      l:`Open (${counts.open})` },
+              { k:'generated', l:`Generated (${counts.generated})` },
+              { k:'applied',   l:`Applied (${counts.applied})` },
+              { k:'discarded', l:`Discarded (${counts.discarded})` },
+            ] as {k:string,l:string}[]).map(t => {
+              const on = wfFilters.has(t.k)
+              return (
+                <button key={t.k}
+                  onClick={() => setWfFilters(s => { const n = new Set(s); n.has(t.k) ? n.delete(t.k) : n.add(t.k); return n })}
+                  className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors border ${on ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white'}`}>
+                  {t.l}
+                </button>
+              )
+            })}
+            {wfFilters.size > 0 && (
+              <button onClick={() => setWfFilters(new Set())} className="px-2 py-1.5 text-sm text-gray-500 hover:text-gray-300">✕</button>
             )}
           </div>
         </div>
-      )}
 
-      {/* ── Filter bar ── */}
-      <div className="flex flex-wrap gap-2 mb-3 items-center">
-        {/* Priority multi-select */}
-        <span className="text-gray-600 text-xs">Priority:</span>
-        <div className="flex gap-1">
-          {([
-            { k:'hot',      l:`🔥 Hot (${counts.hot})` },
-            { k:'good',     l:`✅ Good (${counts.good})` },
-            { k:'maybe',    l:`🤔 Maybe (${counts.maybe})` },
-            { k:'avoid',    l:`❌ Avoid (${counts.avoid})` },
-            { k:'unranked', l:`⏳ Unranked (${counts.unranked})` },
-          ] as {k:string,l:string}[]).map(t => {
-            const on = priFilters.has(t.k)
-            return (
-              <button key={t.k}
-                onClick={() => setPriFilters(s => { const n = new Set(s); n.has(t.k) ? n.delete(t.k) : n.add(t.k); return n })}
-                className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors border ${on ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-800'}`}>
-                {t.l}
-              </button>
-            )
-          })}
-          {priFilters.size > 0 && (
-            <button onClick={() => setPriFilters(new Set())} className="px-2 py-1 text-xs text-gray-500 hover:text-gray-300">✕</button>
-          )}
-        </div>
-
-        <div className="w-px bg-gray-700 self-stretch" />
-
-        {/* Workflow status multi-select */}
-        <span className="text-gray-600 text-xs">Status:</span>
-        <div className="flex gap-1">
-          {([
-            { k:'open',      l:`Open (${counts.open})` },
-            { k:'generated', l:`Generated (${counts.generated})` },
-            { k:'applied',   l:`Applied (${counts.applied})` },
-            { k:'discarded', l:`Discarded (${counts.discarded})` },
-          ] as {k:string,l:string}[]).map(t => {
-            const on = wfFilters.has(t.k)
-            return (
-              <button key={t.k}
-                onClick={() => setWfFilters(s => { const n = new Set(s); n.has(t.k) ? n.delete(t.k) : n.add(t.k); return n })}
-                className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors border ${on ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-800'}`}>
-                {t.l}
-              </button>
-            )
-          })}
-          {wfFilters.size > 0 && (
-            <button onClick={() => setWfFilters(new Set())} className="px-2 py-1 text-xs text-gray-500 hover:text-gray-300">✕</button>
-          )}
-        </div>
       </div>
 
       {/* ── Table ── */}

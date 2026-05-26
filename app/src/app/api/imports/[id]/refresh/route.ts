@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
+
+async function safeJson(res: Response): Promise<unknown> {
+  const text = await res.text()
+  if (!text?.trim()) return null
+  try { return JSON.parse(text) } catch { return null }
+}
 import { normalizeSeekJobs } from '@/lib/import/normalisers/seek'
 import { normalizeIndeedJobs } from '@/lib/import/normalisers/indeed'
 import { NormalizedJob } from '@/lib/import/normalisers/base'
@@ -46,8 +52,8 @@ export async function GET(
       )
     }
 
-    runData = await statusResponse.json()
-    runStatus = runData.data?.status
+    runData = await safeJson(statusResponse) as any
+    runStatus = runData?.data?.status
   } catch (error) {
     console.error('Error checking Apify run status:', error)
     return NextResponse.json({ error: 'Failed to check run status' }, { status: 500 })
@@ -124,7 +130,8 @@ export async function GET(
       return NextResponse.json({ error: 'Failed to fetch dataset' }, { status: 500 })
     }
 
-    rawJobs = await datasetResponse.json()
+    const parsed = await safeJson(datasetResponse)
+    rawJobs = Array.isArray(parsed) ? parsed : []
   } catch (error) {
     console.error('Error fetching dataset:', error)
     return NextResponse.json({ error: 'Failed to fetch dataset' }, { status: 500 })

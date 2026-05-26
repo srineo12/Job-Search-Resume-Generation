@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
 
+/** Safe JSON parse — returns null if body is empty or not valid JSON */
+async function safeJson(res: Response): Promise<unknown> {
+  const text = await res.text()
+  if (!text?.trim()) return null
+  try { return JSON.parse(text) } catch { return null }
+}
+
 /**
  * Build Seek actor input using native actor fields (NOT a URL).
  *
@@ -144,9 +151,9 @@ export async function POST(request: NextRequest) {
       console.error('Apify error:', resp.status, txt)
       return NextResponse.json({ error: `Apify error: ${resp.statusText} — ${txt}` }, { status: 500 })
     }
-    const apifyData = await resp.json()
-    apifyRunId = apifyData.data?.id
-    if (!apifyRunId) return NextResponse.json({ error: 'No run ID from Apify' }, { status: 500 })
+    const apifyData = await safeJson(resp) as Record<string, unknown> | null
+    apifyRunId = (apifyData as any)?.data?.id
+    if (!apifyRunId) return NextResponse.json({ error: 'No run ID from Apify — empty or unexpected response' }, { status: 500 })
   } catch (err) {
     console.error('Apify call failed:', err)
     return NextResponse.json({ error: 'Failed to call Apify' }, { status: 500 })
@@ -155,7 +162,7 @@ export async function POST(request: NextRequest) {
   const { data: importRecord, error: insertErr } = await supabase
     .from('imports')
     .insert({
-      user_id: user.id, source, actor_id: actor.actor_id,
+      user_id: user.id, source, actor_id: actorId,
       keyword_set_ids,
       input_payload: apifyInput,
       apify_run_id: apifyRunId, status: 'queued',

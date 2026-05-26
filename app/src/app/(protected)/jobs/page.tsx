@@ -365,42 +365,83 @@ export default function JobsPage() {
   }
 
   // ── Job-fit Score ─────────────────────────────────────────────────────────
-  // Requires a category (keyword set). Derives scoring prompt from profile
-  // programmatically — no extra AI call for prompt generation.
-  // Loops calling /api/jobs/jobfit until all unscored jobs are done.
   async function handleJobfitScore() {
     if (!selectedCategory) return
-    setScoring(true); let total = 0
-    const jobIds = selected.size > 0 ? [...selected] : undefined // score selected, or all unscored
-    setScoreMsg(`Building scoring context from your profile…`)
-    // First call also saves the generated prompt to the keyword set
-    while (true) {
-      setScoreMsg(`Scoring… ${total} done`)
-      const res = await fetch('/api/jobs/jobfit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          keyword_set_id: selectedCategory,
-          ...(jobIds ? { job_ids: jobIds } : { limit: 5 }),
-        }),
-      })
-      const d = await res.json()
-      if (!res.ok) { setScoreMsg(`⚠️ ${d.error ?? 'Scoring failed'}`); break }
-      total += d.scored || 0
-      if (!d.scored || d.remaining === 0) {
-        if (d.errors > 0) setScoreMsg(`⚠️ ${d.message}`)
-        break
+    setScoring(true)
+    let total = 0
+    const jobIds = selected.size > 0 ? [...selected] : undefined
+
+    setScoreMsg('Building scoring context from your profile…')
+
+    if (jobIds) {
+      // ── Path A: score specific selected jobs (single call) ──
+      setScoreMsg(`Scoring ${jobIds.length} selected job${jobIds.length > 1 ? 's' : ''}…`)
+      try {
+        const res = await fetch('/api/jobs/jobfit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keyword_set_id: selectedCategory, job_ids: jobIds }),
+        })
+        const d = await res.json()
+        if (!res.ok) {
+          setScoreMsg(`⚠️ ${d.error ?? 'Scoring failed'}`)
+        } else {
+          total = d.scored || 0
+          if (total > 0) {
+            setScoreMsg(`✓ ${total} job${total > 1 ? 's' : ''} scored`)
+            loadJobs()
+          } else if (d.errors > 0) {
+            setScoreMsg(`⚠️ ${d.message}`)
+          } else {
+            // scored=0, no errors → those IDs weren't found (stale selection after delete/reimport)
+            // Fall through to score all unscored instead
+            setScoreMsg('Selection was stale — scoring all unscored jobs instead…')
+            await scoreAllUnscored(selectedCategory, (n, msg) => { total = n; setScoreMsg(msg) })
+          }
+        }
+      } catch (err) {
+        setScoreMsg(`⚠️ ${err instanceof Error ? err.message : String(err)}`)
       }
-      setScoreMsg(`Scored ${total}… ${d.remaining} remaining`)
-      if (jobIds) break // specific job_ids — done after one call
+    } else {
+      // ── Path B: score all unscored jobs ──
+      await scoreAllUnscored(selectedCategory, (n, msg) => { total = n; setScoreMsg(msg) })
     }
+
     if (total > 0) {
       setScoreMsg(`✓ ${total} job${total > 1 ? 's' : ''} scored`)
       loadJobs()
-    } else if (total === 0) {
+    } else if (total === 0 && !jobIds) {
       setScoreMsg('✓ All jobs already scored')
     }
+
     setTimeout(() => { setScoring(false); setScoreMsg('') }, 5000)
+  }
+
+  // Helper: loops /api/jobs/jobfit until remaining === 0 or nothing scores
+  async function scoreAllUnscored(
+    categoryId: string,
+    onProgress: (total: number, msg: string) => void,
+  ) {
+    let total = 0
+    let maxRounds = 60 // safety cap — 60 × 5 = 300 jobs max
+    while (maxRounds-- > 0) {
+      onProgress(total, `Scoring… ${total} done`)
+      const res = await fetch('/api/jobs/jobfit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword_set_id: categoryId, limit: 5 }),
+      })
+      const d = await res.json()
+      if (!res.ok) { onProgress(total, `⚠️ ${d.error ?? 'Scoring failed'}`); return }
+      total += d.scored || 0
+      if (d.remaining === 0) break                        // all done
+      if (!d.scored && d.errors === 0) break              // nothing to score
+      if (!d.scored && d.errors > 0) {                    // errors but nothing scored — stop looping
+        onProgress(total, `⚠️ ${d.message}`); return
+      }
+      onProgress(total, `Scored ${total}… ${d.remaining} remaining`)
+    }
+    return total
   }
 
   async function handleDeleteJob(id: string) {

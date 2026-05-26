@@ -64,12 +64,14 @@ export async function POST(request: NextRequest) {
   const categoryKeywords = Array.isArray(kwSet.keywords) ? kwSet.keywords as string[] : []
   const scoringPrompt = buildJobfitScoringPrompt(profile, kwSet.name, categoryKeywords)
 
-  // Save prompt to keyword_sets so Settings → Keywords can display it
-  await supabase
+  // Save prompt to keyword_sets so Settings → Keywords can display it.
+  // Silently ignore if the column doesn't exist yet (migration not applied).
+  const { error: promptSaveErr } = await supabase
     .from('keyword_sets')
     .update({ jobfit_prompt: scoringPrompt })
     .eq('id', keyword_set_id)
     .eq('user_id', user.id)
+  if (promptSaveErr) console.warn('jobfit_prompt save skipped:', promptSaveErr.message)
 
   // ── 4. Load jobs to score ──
   let query = supabase

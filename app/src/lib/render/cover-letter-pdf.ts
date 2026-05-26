@@ -1,62 +1,77 @@
-import PDFDocument from 'pdfkit'
+import { PDFDocument, StandardFonts, rgb, PageSizes } from 'pdf-lib'
 import type { CoverLetterData } from './types'
 
-const MARGIN = 50
-const PAGE_W = 595.28
-const CONTENT_W = PAGE_W - MARGIN * 2
+const C_HEADING = rgb(0.102, 0.102, 0.180)
+const C_BLACK   = rgb(0, 0, 0)
+const C_GREY    = rgb(0.267, 0.267, 0.267)
+const C_LGREY   = rgb(0.533, 0.533, 0.533)
+
+const ML = 50, MR = 50, MT = 50, MB = 50
+const [W, H] = PageSizes.A4
+const CW = W - ML - MR
 
 export async function buildCoverLetterPdf(data: CoverLetterData): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: MARGIN, autoFirstPage: true })
-    const chunks: Buffer[] = []
-    doc.on('data', c => chunks.push(c))
-    doc.on('end', () => resolve(Buffer.concat(chunks)))
-    doc.on('error', reject)
+  const doc  = await PDFDocument.create()
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold)
+  const reg  = await doc.embedFont(StandardFonts.Helvetica)
 
-    const c = data.candidate
+  const page = doc.addPage(PageSizes.A4)
+  let y = H - MT
 
-    // ── Name ──
-    doc.font('Helvetica-Bold').fontSize(20).fillColor('#1a1a2e')
-      .text(c.name.toUpperCase(), MARGIN, MARGIN)
-
-    // ── Contact line ──
-    const contact = [c.location, c.phone, c.email, c.linkedin ? `LinkedIn: ${c.linkedin}` : '']
-      .filter(Boolean).join('  |  ')
-    doc.font('Helvetica').fontSize(9).fillColor('#444444')
-      .text(contact, MARGIN, doc.y + 4, { width: CONTENT_W })
-
-    // ── Divider ──
-    doc.moveDown(0.3)
-    const lineY = doc.y
-    doc.moveTo(MARGIN, lineY).lineTo(PAGE_W - MARGIN, lineY).lineWidth(1).strokeColor('#333333').stroke()
-    doc.moveDown(0.8)
-
-    // ── Date ──
-    doc.font('Helvetica').fontSize(10).fillColor('#000000').text(data.date, MARGIN, doc.y)
-    doc.moveDown(0.8)
-
-    // ── Recipient ──
-    doc.font('Helvetica-Bold').fontSize(10).text(data.recipient_name)
-    doc.font('Helvetica-Bold').fontSize(10).text(data.company)
-    doc.font('Helvetica').fontSize(10).fillColor('#000000').text(data.address)
-    doc.moveDown(0.8)
-
-    // ── Salutation ──
-    doc.font('Helvetica').fontSize(10).text(data.salutation)
-    doc.moveDown(0.6)
-
-    // ── Body paragraphs ──
-    for (const para of data.paragraphs) {
-      doc.font('Helvetica').fontSize(10).fillColor('#000000')
-        .text(para, MARGIN, doc.y, { width: CONTENT_W, align: 'justify' })
-      doc.moveDown(0.7)
+  function drawWrapped(text: string, font: typeof bold, size: number, color: typeof C_BLACK) {
+    const words = String(text).split(' ')
+    let line = ''
+    const lines: string[] = []
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w
+      if (font.widthOfTextAtSize(test, size) > CW && line) { lines.push(line); line = w }
+      else line = test
     }
+    if (line) lines.push(line)
+    for (const l of lines) {
+      y -= size
+      page.drawText(l, { x: ML, y, size, font, color })
+      y -= 2
+    }
+  }
 
-    // ── Closing ──
-    doc.font('Helvetica').fontSize(10).text(data.closing)
-    doc.moveDown(2.5)
-    doc.font('Helvetica').fontSize(10).text(c.name)
+  function gap(n = 8) { y -= n }
 
-    doc.end()
-  })
+  const c = data.candidate
+  // Name
+  y -= 20
+  page.drawText(c.name.toUpperCase(), { x: ML, y, size: 20, font: bold, color: C_HEADING })
+  y -= 6
+  // Contact
+  const contact = [c.location, c.phone, c.email, c.linkedin ? `LinkedIn: ${c.linkedin}` : ''].filter(Boolean).join('  |  ')
+  drawWrapped(contact, reg, 9, C_GREY)
+  y -= 2
+  page.drawLine({ start: { x: ML, y: y - 1 }, end: { x: W - MR, y: y - 1 }, thickness: 1, color: rgb(0.2, 0.2, 0.2) })
+  gap(14)
+
+  // Date
+  drawWrapped(data.date, reg, 10, C_BLACK); gap()
+
+  // Recipient
+  drawWrapped(data.recipient_name, bold, 10, C_BLACK)
+  drawWrapped(data.company,        bold, 10, C_BLACK)
+  drawWrapped(data.address,        reg,  10, C_BLACK); gap()
+
+  // Salutation
+  drawWrapped(data.salutation, reg, 10, C_BLACK); gap()
+
+  // Body
+  for (const para of data.paragraphs) {
+    drawWrapped(para, reg, 10, C_BLACK); gap(10)
+  }
+
+  // Closing
+  drawWrapped(data.closing, reg, 10, C_BLACK)
+  gap(36)
+  drawWrapped(c.name, reg, 10, C_BLACK)
+
+  // Page footer
+  page.drawText(`${c.name} - Cover Letter`, { x: ML, y: MB - 14, size: 8, font: reg, color: C_LGREY })
+
+  return Buffer.from(await doc.save())
 }

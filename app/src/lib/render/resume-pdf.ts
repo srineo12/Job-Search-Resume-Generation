@@ -1,123 +1,126 @@
-import PDFDocument from 'pdfkit'
+import { PDFDocument, StandardFonts, rgb, PageSizes } from 'pdf-lib'
 import type { ResumeData } from './types'
 
-const MARGIN = 50
-const PAGE_W = 595.28  // A4 width in points
-const CONTENT_W = PAGE_W - MARGIN * 2
+const C_HEADING = rgb(0.102, 0.102, 0.180)
+const C_BLACK   = rgb(0, 0, 0)
+const C_GREY    = rgb(0.267, 0.267, 0.267)
+const C_LGREY   = rgb(0.533, 0.533, 0.533)
+const C_RULE    = rgb(0.8, 0.8, 0.8)
+
+const ML = 50, MR = 50, MT = 50, MB = 50
+const [W, H] = PageSizes.A4
+const CW = W - ML - MR
 
 export async function buildResumePdf(data: ResumeData): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: MARGIN, autoFirstPage: true })
-    const chunks: Buffer[] = []
-    doc.on('data', c => chunks.push(c))
-    doc.on('end', () => resolve(Buffer.concat(chunks)))
-    doc.on('error', reject)
+  const doc  = await PDFDocument.create()
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold)
+  const reg  = await doc.embedFont(StandardFonts.Helvetica)
 
-    const c = data.candidate
+  let page = doc.addPage(PageSizes.A4)
+  let y = H - MT
+  let pageNum = 1
 
-    // ── Page number footer via addPage event ──
-    let pageNum = 1
-    function addFooter() {
-      const y = doc.page.height - MARGIN + 10
-      doc.save()
-        .fontSize(8).fillColor('#888888').font('Helvetica')
-        .text(`${c.name} - Resume - Page ${pageNum}`, MARGIN, y, { width: CONTENT_W, align: 'center' })
-        .restore()
-      pageNum++
+  function footer() {
+    page.drawText(`${data.candidate.name} - Resume - Page ${pageNum}`, {
+      x: ML, y: MB - 14, size: 8, font: reg, color: C_LGREY,
+    })
+  }
+
+  function newPage() {
+    footer()
+    page = doc.addPage(PageSizes.A4)
+    y = H - MT
+    pageNum++
+  }
+
+  function checkRoom(need: number) { if (y - need < MB + 30) newPage() }
+
+  function drawWrapped(
+    text: string,
+    font: typeof bold,
+    size: number,
+    color: typeof C_BLACK,
+    indent = 0,
+  ) {
+    const x    = ML + indent
+    const maxW = CW - indent
+    const words = String(text).split(' ')
+    let line = ''
+    const lines: string[] = []
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w
+      if (font.widthOfTextAtSize(test, size) > maxW && line) { lines.push(line); line = w }
+      else line = test
     }
-
-    // ── Name ──
-    doc.font('Helvetica-Bold').fontSize(20).fillColor('#1a1a2e')
-      .text(c.name.toUpperCase(), MARGIN, MARGIN)
-
-    // ── Contact line ──
-    const contact = [c.location, c.phone, c.email, c.linkedin ? `LinkedIn: ${c.linkedin}` : '']
-      .filter(Boolean).join('  |  ')
-    doc.font('Helvetica').fontSize(9).fillColor('#444444')
-      .text(contact, MARGIN, doc.y + 4, { width: CONTENT_W })
-
-    // ── Divider ──
-    doc.moveDown(0.3)
-    const lineY = doc.y
-    doc.moveTo(MARGIN, lineY).lineTo(PAGE_W - MARGIN, lineY).lineWidth(1).strokeColor('#333333').stroke()
-    doc.moveDown(0.5)
-
-    // ── Section helper ──
-    function section(title: string) {
-      // Check if near bottom of page
-      if (doc.y > doc.page.height - MARGIN - 100) {
-        addFooter()
-        doc.addPage()
-      }
-      doc.moveDown(0.4)
-      doc.font('Helvetica-Bold').fontSize(10).fillColor('#1a1a2e')
-        .text(title.toUpperCase(), MARGIN, doc.y, { width: CONTENT_W })
-      const y2 = doc.y
-      doc.moveTo(MARGIN, y2).lineTo(PAGE_W - MARGIN, y2).lineWidth(0.5).strokeColor('#cccccc').stroke()
-      doc.moveDown(0.4)
+    if (line) lines.push(line)
+    for (const l of lines) {
+      checkRoom(size + 3)
+      y -= size
+      page.drawText(l, { x, y, size, font, color })
+      y -= 2
     }
+  }
 
-    function bodyText(text: string) {
-      doc.font('Helvetica').fontSize(9.5).fillColor('#000000')
-        .text(text, MARGIN, doc.y, { width: CONTENT_W, align: 'justify' })
-      doc.moveDown(0.2)
-    }
+  function rule(color = C_RULE, thick = 0.5) {
+    page.drawLine({ start: { x: ML, y: y - 1 }, end: { x: W - MR, y: y - 1 }, thickness: thick, color })
+    y -= 5
+  }
 
-    function bulletText(text: string) {
-      doc.font('Helvetica').fontSize(9.5).fillColor('#000000')
-        .text(`- ${text}`, MARGIN + 12, doc.y, { width: CONTENT_W - 12, align: 'justify' })
-      doc.moveDown(0.15)
-    }
+  function gap(n = 6) { y -= n }
 
-    // ── Summary ──
-    section('Summary')
-    bodyText(data.summary)
+  function section(title: string) {
+    gap(8); checkRoom(22)
+    drawWrapped(title.toUpperCase(), bold, 10, C_HEADING)
+    rule(); gap(2)
+  }
 
-    // ── Key Skills ──
-    section('Key Skills')
-    bodyText(data.key_skills.join(' | '))
+  const c = data.candidate
+  // Name
+  y -= 20
+  page.drawText(c.name.toUpperCase(), { x: ML, y, size: 20, font: bold, color: C_HEADING })
+  y -= 6
+  // Contact
+  const contact = [c.location, c.phone, c.email, c.linkedin ? `LinkedIn: ${c.linkedin}` : ''].filter(Boolean).join('  |  ')
+  drawWrapped(contact, reg, 9, C_GREY)
+  y -= 2
+  rule(rgb(0.2, 0.2, 0.2), 1)
+  gap(4)
 
-    // ── Professional Experience ──
-    section('Professional Experience')
-    for (const exp of data.experience) {
-      if (doc.y > doc.page.height - MARGIN - 100) {
-        addFooter(); doc.addPage()
-      }
-      doc.moveDown(0.3)
-      doc.font('Helvetica-Bold').fontSize(10).fillColor('#000000')
-        .text(`${exp.role}`, MARGIN, doc.y, { continued: true })
-        .font('Helvetica').text(` | ${exp.company}`)
-      doc.font('Helvetica').fontSize(9).fillColor('#555555')
-        .text(`${exp.period} | ${exp.location}`, MARGIN, doc.y)
-      doc.moveDown(0.2)
-      for (const b of exp.bullets) bulletText(b)
-    }
+  section('Summary')
+  drawWrapped(data.summary, reg, 9.5, C_BLACK)
 
-    // ── Education ──
-    section('Education')
-    for (const ed of data.education) {
-      doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#000000')
-        .text(`${ed.degree} | ${ed.institution} | ${ed.location} | ${ed.period}`, MARGIN, doc.y, { width: CONTENT_W })
-      if (ed.achievement) {
-        doc.moveDown(0.1)
-        bulletText(ed.achievement)
-      }
-      doc.moveDown(0.2)
-    }
+  section('Key Skills')
+  drawWrapped(data.key_skills.join(' | '), reg, 9.5, C_BLACK)
 
-    // ── Certifications ──
-    section('Certifications and Checks')
-    bodyText(data.certifications)
+  section('Professional Experience')
+  for (const exp of data.experience) {
+    gap(4); checkRoom(30)
+    const roleW = bold.widthOfTextAtSize(exp.role, 10)
+    y -= 10
+    page.drawText(exp.role, { x: ML, y, size: 10, font: bold, color: C_BLACK })
+    page.drawText(` | ${exp.company}`, { x: ML + roleW, y, size: 10, font: reg, color: C_BLACK })
+    y -= 2
+    drawWrapped(`${exp.period} | ${exp.location}`, reg, 9, C_GREY)
+    y -= 1
+    for (const b of exp.bullets) { checkRoom(14); drawWrapped(`- ${b}`, reg, 9.5, C_BLACK, 10) }
+  }
 
-    // ── Technical Skills ──
-    section('Technical Skills')
-    bodyText(data.technical_skills.join(' | '))
+  section('Education')
+  for (const ed of data.education) {
+    gap(4); checkRoom(20)
+    drawWrapped(`${ed.degree} | ${ed.institution} | ${ed.location} | ${ed.period}`, bold, 9.5, C_BLACK)
+    if (ed.achievement) drawWrapped(`- ${ed.achievement}`, reg, 9.5, C_BLACK, 10)
+  }
 
-    // ── Additional Information ──
-    section('Additional Information')
-    for (const b of data.additional_info) bulletText(b)
+  section('Certifications and Checks')
+  drawWrapped(data.certifications, reg, 9.5, C_BLACK)
 
-    addFooter()
-    doc.end()
-  })
+  section('Technical Skills')
+  drawWrapped(data.technical_skills.join(' | '), reg, 9.5, C_BLACK)
+
+  section('Additional Information')
+  for (const b of data.additional_info) { checkRoom(14); drawWrapped(`- ${b}`, reg, 9.5, C_BLACK, 10) }
+
+  footer()
+  return Buffer.from(await doc.save())
 }

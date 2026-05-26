@@ -275,6 +275,20 @@ export default function JobsPage() {
   const workTypes    = [...new Set(jobs.map(j => j.work_type).filter(Boolean))]
   const arrangements = [...new Set(jobs.map(j => j.raw_payload?.workArrangements as string).filter(Boolean))]
 
+  // ── Counts derived from visible rows (respects all active filters) ─────────
+  const visibleCounts = {
+    total:     visible.length,
+    hot:       visible.filter(j => j.ai_priority === 'hot').length,
+    good:      visible.filter(j => j.ai_priority === 'good').length,
+    maybe:     visible.filter(j => j.ai_priority === 'maybe').length,
+    avoid:     visible.filter(j => j.ai_priority === 'avoid').length,
+    unranked:  visible.filter(j => !j.ai_ranked_at).length,
+    open:      visible.filter(j => wfOf(j.status) === 'open').length,
+    generated: visible.filter(j => wfOf(j.status) === 'generated').length,
+    applied:   visible.filter(j => wfOf(j.status) === 'applied').length,
+    discarded: visible.filter(j => wfOf(j.status) === 'discarded').length,
+  }
+
   // ── Column resize ─────────────────────────────────────────────────────────
   function startResize(key: string, e: React.MouseEvent) {
     e.preventDefault()
@@ -374,31 +388,32 @@ export default function JobsPage() {
     setScoreMsg('Building scoring context from your profile…')
 
     if (jobIds) {
-      // ── Path A: score specific selected jobs (single call) ──
+      // ── Path A: score specific selected jobs — loop until all done ──
       setScoreMsg(`Scoring ${jobIds.length} selected job${jobIds.length > 1 ? 's' : ''}…`)
       try {
-        const res = await fetch('/api/jobs/jobfit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ keyword_set_id: selectedCategory, job_ids: jobIds }),
-        })
-        const d = await res.json()
-        if (!res.ok) {
-          setScoreMsg(`⚠️ ${d.error ?? 'Scoring failed'}`)
-        } else {
-          total = d.scored || 0
-          if (total > 0) {
-            setScoreMsg(`✓ ${total} job${total > 1 ? 's' : ''} scored`)
-            loadJobs()
-          } else if (d.errors > 0) {
-            setScoreMsg(`⚠️ ${d.message}`)
-          } else {
-            // scored=0, no errors → those IDs weren't found (stale selection after delete/reimport)
-            // Fall through to score all unscored instead
+        // Send all IDs but keep batches of 5 to avoid OpenAI timeouts
+        const batchSize = 5
+        let remaining = [...jobIds]
+        while (remaining.length > 0) {
+          const batch = remaining.slice(0, batchSize)
+          const res = await fetch('/api/jobs/jobfit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keyword_set_id: selectedCategory, job_ids: batch, limit: batchSize }),
+          })
+          const d = await res.json()
+          if (!res.ok) { setScoreMsg(`⚠️ ${d.error ?? 'Scoring failed'}`); break }
+          total += d.scored || 0
+          remaining = remaining.slice(batchSize)
+          if (remaining.length > 0) setScoreMsg(`Scored ${total}… ${remaining.length} remaining`)
+          if (!d.scored && d.errors === 0) {
+            // IDs not found (stale) — fall through to score all unscored
             setScoreMsg('Selection was stale — scoring all unscored jobs instead…')
             await scoreAllUnscored(selectedCategory, (n, msg) => { total = n; setScoreMsg(msg) })
+            break
           }
         }
+        if (total > 0) loadJobs()
       } catch (err) {
         setScoreMsg(`⚠️ ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -530,9 +545,9 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.7.8</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.7.9</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
-            {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unscored
+            {visibleCounts.total} total · {visibleCounts.hot} hot · {visibleCounts.good} good · {visibleCounts.unranked} unscored
           </p>
         </div>
 
@@ -595,30 +610,8 @@ export default function JobsPage() {
         <div className="mb-3 p-2.5 bg-indigo-950 border border-indigo-800 rounded-lg text-indigo-300 text-xs">{scoreMsg}</div>
       )}
 
-      {/* ── Category + Priority + Status filter bar ── */}
+      {/* ── Priority + Status filter bar ── */}
       <div className="flex flex-col gap-2 mb-4">
-
-        {/* Category pills */}
-        {categories.length > 0 && (
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-gray-400 text-sm font-medium w-20 shrink-0">Category:</span>
-            <div className="flex gap-1.5 flex-wrap">
-              {categories.map(cat => {
-                const on = catFilters.has(cat)
-                return (
-                  <button key={cat}
-                    onClick={() => setCatFilters(s => { const n = new Set(s); n.has(cat) ? n.delete(cat) : n.add(cat); return n })}
-                    className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors border ${on ? 'bg-teal-700 border-teal-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white'}`}>
-                    {cat}
-                  </button>
-                )
-              })}
-              {catFilters.size > 0 && (
-                <button onClick={() => setCatFilters(new Set())} className="px-2 py-1.5 text-sm text-gray-500 hover:text-gray-300">✕ clear</button>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Priority + Status in one row */}
         <div className="flex flex-wrap gap-3 items-center">
@@ -626,11 +619,11 @@ export default function JobsPage() {
           <span className="text-gray-400 text-sm font-medium w-20 shrink-0">Priority:</span>
           <div className="flex gap-1.5 flex-wrap">
             {([
-              { k:'hot',      l:`🔥 Hot (${counts.hot})` },
-              { k:'good',     l:`✅ Good (${counts.good})` },
-              { k:'maybe',    l:`🤔 Maybe (${counts.maybe})` },
-              { k:'avoid',    l:`❌ Avoid (${counts.avoid})` },
-              { k:'unranked', l:`⏳ Unranked (${counts.unranked})` },
+              { k:'hot',      l:`🔥 Hot (${visibleCounts.hot})` },
+              { k:'good',     l:`✅ Good (${visibleCounts.good})` },
+              { k:'maybe',    l:`🤔 Maybe (${visibleCounts.maybe})` },
+              { k:'avoid',    l:`❌ Avoid (${visibleCounts.avoid})` },
+              { k:'unranked', l:`⏳ Unranked (${visibleCounts.unranked})` },
             ] as {k:string,l:string}[]).map(t => {
               const on = priFilters.has(t.k)
               return (
@@ -652,10 +645,10 @@ export default function JobsPage() {
           <span className="text-gray-400 text-sm font-medium shrink-0">Status:</span>
           <div className="flex gap-1.5 flex-wrap">
             {([
-              { k:'open',      l:`Open (${counts.open})` },
-              { k:'generated', l:`Generated (${counts.generated})` },
-              { k:'applied',   l:`Applied (${counts.applied})` },
-              { k:'discarded', l:`Discarded (${counts.discarded})` },
+              { k:'open',      l:`Open (${visibleCounts.open})` },
+              { k:'generated', l:`Generated (${visibleCounts.generated})` },
+              { k:'applied',   l:`Applied (${visibleCounts.applied})` },
+              { k:'discarded', l:`Discarded (${visibleCounts.discarded})` },
             ] as {k:string,l:string}[]).map(t => {
               const on = wfFilters.has(t.k)
               return (

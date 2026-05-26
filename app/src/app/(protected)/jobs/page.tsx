@@ -530,7 +530,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.7.7</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.7.8</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {counts.total} total · {counts.hot} hot · {counts.good} good · {counts.unranked} unscored
           </p>
@@ -557,10 +557,19 @@ export default function JobsPage() {
               }} className="px-3 py-1.5 bg-red-950 hover:bg-red-900 text-red-400 text-xs rounded-lg">🗑 Delete</button>
             </>
           )}
-          {/* Category dropdown — required to enable Job-fit Score */}
+          {/* Category dropdown — required to enable Job-fit Score; also filters table rows */}
           <select
             value={selectedCategory}
-            onChange={e => setSelectedCategory(e.target.value)}
+            onChange={e => {
+              const id = e.target.value
+              setSelectedCategory(id)
+              if (id) {
+                const name = keywordSets.find(ks => ks.id === id)?.name
+                if (name) setCatFilters(new Set([name]))
+              } else {
+                setCatFilters(new Set())
+              }
+            }}
             className="px-3 py-1.5 bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-500"
           >
             <option value="">Category…</option>

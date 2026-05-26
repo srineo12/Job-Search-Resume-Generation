@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-type KeywordSet = { id: string; name: string; keywords: string[]; set_type: string; is_active: boolean; created_at: string; jobfit_prompt?: string }
+type KeywordSet = { id: string; name: string; keywords: string[]; set_type: string; is_active: boolean; created_at: string }
 
 function SetSection({
   title, description, setType, accentClass,
@@ -13,6 +13,20 @@ function SetSection({
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<KeywordSet | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  // Prompt preview state: id → { loading, prompt, error }
+  const [promptState, setPromptState] = useState<Record<string, { loading: boolean; prompt?: string; error?: string }>>({})
+
+  async function loadPrompt(id: string) {
+    setPromptState(p => ({ ...p, [id]: { loading: true } }))
+    try {
+      const res = await fetch(`/api/settings/keywords/${id}/prompt`)
+      const d = await res.json()
+      if (!res.ok) setPromptState(p => ({ ...p, [id]: { loading: false, error: d.error ?? 'Failed to load prompt' } }))
+      else setPromptState(p => ({ ...p, [id]: { loading: false, prompt: d.prompt } }))
+    } catch (e) {
+      setPromptState(p => ({ ...p, [id]: { loading: false, error: String(e) } }))
+    }
+  }
 
   async function load() {
     const res = await fetch(`/api/settings/keywords?set_type=${setType}`)
@@ -141,13 +155,27 @@ function SetSection({
                 {expanded === s.id && (
                   <div className="mt-3 pt-3 border-t border-gray-800 space-y-3">
                     <div>
-                      <p className="text-xs font-medium text-gray-400 mb-1.5">⚡ Saved Job-fit Prompt</p>
-                      {s.jobfit_prompt ? (
-                        <pre className="text-xs text-gray-300 bg-gray-950 border border-gray-700 rounded-lg p-3 whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto">
-                          {s.jobfit_prompt}
+                      <div className="flex items-center gap-3 mb-1.5">
+                        <p className="text-xs font-medium text-gray-400">⚡ Job-fit Scoring Prompt</p>
+                        {!promptState[s.id]?.prompt && (
+                          <button
+                            onClick={() => loadPrompt(s.id)}
+                            disabled={promptState[s.id]?.loading}
+                            className="px-2 py-0.5 bg-purple-800 hover:bg-purple-700 disabled:opacity-50 text-purple-200 text-xs rounded"
+                          >
+                            {promptState[s.id]?.loading ? 'Loading…' : 'Preview Prompt'}
+                          </button>
+                        )}
+                      </div>
+                      {promptState[s.id]?.error && (
+                        <p className="text-red-400 text-xs italic">{promptState[s.id].error}</p>
+                      )}
+                      {promptState[s.id]?.prompt ? (
+                        <pre className="text-xs text-gray-300 bg-gray-950 border border-gray-700 rounded-lg p-3 whitespace-pre-wrap font-mono leading-relaxed max-h-64 overflow-y-auto">
+                          {promptState[s.id].prompt}
                         </pre>
-                      ) : (
-                        <p className="text-gray-600 text-xs italic">No prompt generated yet — run Job-fit Score on the Jobs page to generate one.</p>
+                      ) : !promptState[s.id]?.error && !promptState[s.id]?.loading && (
+                        <p className="text-gray-600 text-xs italic">Click "Preview Prompt" to see the AI scoring instructions generated from your profile + this category.</p>
                       )}
                     </div>
                     <div className="flex gap-3">

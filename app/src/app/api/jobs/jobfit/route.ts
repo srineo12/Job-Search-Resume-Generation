@@ -64,6 +64,13 @@ export async function POST(request: NextRequest) {
   const categoryKeywords = Array.isArray(kwSet.keywords) ? kwSet.keywords as string[] : []
   const scoringPrompt = buildJobfitScoringPrompt(profile, kwSet.name, categoryKeywords)
 
+  // Save prompt to keyword_sets so Settings → Keywords can display it
+  await supabase
+    .from('keyword_sets')
+    .update({ jobfit_prompt: scoringPrompt })
+    .eq('id', keyword_set_id)
+    .eq('user_id', user.id)
+
   // ── 4. Load jobs to score ──
   let query = supabase
     .from('jobs')

@@ -1,10 +1,10 @@
-export const runtime = 'nodejs'  // pdfkit requires Node.js — not Edge
+export const runtime = 'nodejs'  // docx requires Node.js — not Edge
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
 import { generateResumeData, generateCoverLetterData, generateDocumentFraming, calculateAtsScore } from '@/lib/ai/generate-documents'
-import { buildResumePdf } from '@/lib/render/resume-pdf'
-import { buildCoverLetterPdf } from '@/lib/render/cover-letter-pdf'
+import { buildResumeDocx } from '@/lib/render/resume-docx'
+import { buildCoverLetterDocx } from '@/lib/render/cover-letter-docx'
 import JSZip from 'jszip'
 
 function slugify(text: string, limit = 22): string {
@@ -70,15 +70,15 @@ export async function POST(
     return NextResponse.json({ error: `AI generation failed: ${msg}` }, { status: 500 })
   }
 
-  // ── 5. Render PDF + ATS score (parallel) ──
-  // Using pdfkit with standard PDF fonts (Helvetica) — no external font files needed.
-  // ATS score runs in parallel with PDF rendering — failure is non-fatal.
-  let resumePdf: Buffer, clPdf: Buffer
+  // ── 5. Render DOCX + ATS score (parallel) ──
+  // pdfkit Helvetica.afm is missing on Vercel — using docx instead.
+  // ATS score runs in parallel — failure is non-fatal.
+  let resumeDocx: Buffer, clDocx: Buffer
   let atsResult: Awaited<ReturnType<typeof calculateAtsScore>> | null = null
   try {
-    ;[resumePdf, clPdf, atsResult] = await Promise.all([
-      buildResumePdf(resumeData),
-      buildCoverLetterPdf(clData),
+    ;[resumeDocx, clDocx, atsResult] = await Promise.all([
+      buildResumeDocx(resumeData),
+      buildCoverLetterDocx(clData),
       calculateAtsScore(resumeData, job.title ?? '', job.description_text ?? '').catch(err => {
         console.error('ATS score failed (non-fatal):', err)
         return null
@@ -90,7 +90,6 @@ export async function POST(
   }
 
   // ── 6. Package as ZIP ──
-  // Format: {title}_{employer}_{jobId} — title first so it's readable at a glance
   const candidateName = resumeData.candidate.name.replace(/\s+/g, '_')
   const titleSlug     = slugify(job.title    ?? 'Role',     22)
   const employerSlug  = slugify(job.employer ?? 'Employer', 22)
@@ -100,8 +99,8 @@ export async function POST(
 
   const zip = new JSZip()
   const folder = zip.folder(folderName)!
-  folder.file(`${filePrefix}_Resume.pdf`,       resumePdf)
-  folder.file(`${filePrefix}_Cover_Letter.pdf`, clPdf)
+  folder.file(`${filePrefix}_Resume.docx`,       resumeDocx)
+  folder.file(`${filePrefix}_Cover_Letter.docx`, clDocx)
 
   const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 

@@ -2,8 +2,13 @@ export const runtime = 'nodejs'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
-import { generateJobfitScoringPrompt } from '@/lib/ai/generate-documents'
+import { buildJobfitScoringPrompt } from '@/lib/ai/generate-documents'
 import OpenAI from 'openai'
+
+/** Strip markdown code fences so JSON.parse never fails on ```json blocks */
+function extractJson(raw: string): string {
+  return raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
+}
 
 /**
  * POST /api/jobs/jobfit
@@ -55,16 +60,9 @@ export async function POST(request: NextRequest) {
 
   const profile = profileRow.profile_json as Record<string, unknown>
 
-  // ── 3. Build scoring prompt from profile + category (AI-generated, category-specific) ──
+  // ── 3. Build scoring prompt — deterministic, guaranteed correct JSON schema ──
   const categoryKeywords = Array.isArray(kwSet.keywords) ? kwSet.keywords as string[] : []
-  const scoringPrompt = await generateJobfitScoringPrompt(profile, kwSet.name, categoryKeywords)
-
-  // Save prompt to keyword_sets for visibility on Keyword Sets page
-  await supabase
-    .from('keyword_sets')
-    .update({ jobfit_prompt: scoringPrompt })
-    .eq('id', keyword_set_id)
-    .eq('user_id', user.id)
+  const scoringPrompt = buildJobfitScoringPrompt(profile, kwSet.name, categoryKeywords)
 
   // ── 4. Load jobs to score ──
   let query = supabase
@@ -119,7 +117,12 @@ export async function POST(request: NextRequest) {
       })
 
       let ranking: Record<string, unknown> = {}
-      try { ranking = JSON.parse(completion.choices[0]?.message?.content ?? '{}') } catch { /* use empty */ }
+      try {
+        const raw = completion.choices[0]?.message?.content ?? '{}'
+        ranking = JSON.parse(extractJson(raw))
+      } catch (e) {
+        console.error('JSON parse failed for job', job.title, e)
+      }
 
       const score    = Math.min(100, Math.max(0, Math.round(Number(ranking.score) || 0)))
       const priority = ['hot', 'good', 'maybe', 'avoid'].includes(String(ranking.priority))

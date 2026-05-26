@@ -379,7 +379,7 @@ Write a scoring system prompt that correctly evaluates job listings in this spec
     temperature: 0.3,
   })
 
-  return completion.choices[0]?.message?.content?.trim() ?? _buildJobfitScoringPromptFallback(profile, categoryName, categoryKeywords)
+  return completion.choices[0]?.message?.content?.trim() ?? buildJobfitScoringPrompt(profile, categoryName, categoryKeywords)
 }
 
 // ── Meta-prompt: generates resume + cover letter framing for a specific job ──
@@ -453,9 +453,10 @@ Write framing instructions for tailoring resume and cover letter to this specifi
   }
 }
 
-// ── Fallback: static prompt used if AI meta-call fails ──────────────────────
+// ── Scoring prompt: deterministic, correct JSON schema guaranteed ────────────
+// Exported so jobfit/route.ts can use it directly without an extra AI call.
 
-function _buildJobfitScoringPromptFallback(
+export function buildJobfitScoringPrompt(
   profile: Record<string, unknown>,
   categoryName: string,
   categoryKeywords: string[],

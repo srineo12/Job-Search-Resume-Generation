@@ -1020,6 +1020,40 @@ export default function JobsPage() {
           </table>
         </div>
       )}
+
+      {/* ── Global processing lock overlay ──────────────────────────────────────
+          Covers the full viewport (including sidebar) while scoring or generating.
+          Blocks all clicks and navigation until the operation completes.        */}
+      {isBusy && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.65)' }}
+          className="flex flex-col items-center justify-center gap-4 backdrop-blur-sm"
+          aria-modal="true"
+          aria-label="Processing — please wait"
+        >
+          {/* Spinner */}
+          <svg
+            className="animate-spin"
+            style={{ width: 52, height: 52, color: '#818cf8' }}
+            xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+          >
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+
+          {/* Message */}
+          <p className="text-white text-lg font-semibold tracking-wide">
+            {scoring ? 'Running Job-fit Score…' : 'Generating Documents…'}
+          </p>
+          {scoring && scoreMsg && (
+            <p className="text-gray-300 text-sm max-w-sm text-center">{scoreMsg}</p>
+          )}
+          {generating && (
+            <p className="text-gray-300 text-sm">This takes about 10–20 seconds. Do not navigate away.</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

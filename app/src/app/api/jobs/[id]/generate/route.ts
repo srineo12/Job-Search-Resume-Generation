@@ -1,10 +1,10 @@
-export const runtime = 'nodejs'  // docx requires Node.js — not Edge
+export const runtime = 'nodejs'  // pdfkit requires Node.js — not Edge
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
 import { generateResumeData, generateCoverLetterData, generateDocumentFraming, calculateAtsScore } from '@/lib/ai/generate-documents'
-import { buildResumeDocx } from '@/lib/render/resume-docx'
-import { buildCoverLetterDocx } from '@/lib/render/cover-letter-docx'
+import { buildResumePdf } from '@/lib/render/resume-pdf'
+import { buildCoverLetterPdf } from '@/lib/render/cover-letter-pdf'
 import JSZip from 'jszip'
 
 function slugify(text: string, limit = 22): string {
@@ -70,15 +70,15 @@ export async function POST(
     return NextResponse.json({ error: `AI generation failed: ${msg}` }, { status: 500 })
   }
 
-  // ── 5. Render DOCX + ATS score (parallel) ──
-  // PDF generation via pdfkit is disabled — Helvetica font paths fail on Vercel.
-  // ATS score runs in parallel with DOCX rendering — failure is non-fatal.
-  let resumeDocx: Buffer, clDocx: Buffer
+  // ── 5. Render PDF + ATS score (parallel) ──
+  // Using pdfkit with standard PDF fonts (Helvetica) — no external font files needed.
+  // ATS score runs in parallel with PDF rendering — failure is non-fatal.
+  let resumePdf: Buffer, clPdf: Buffer
   let atsResult: Awaited<ReturnType<typeof calculateAtsScore>> | null = null
   try {
-    ;[resumeDocx, clDocx, atsResult] = await Promise.all([
-      buildResumeDocx(resumeData),
-      buildCoverLetterDocx(clData),
+    ;[resumePdf, clPdf, atsResult] = await Promise.all([
+      buildResumePdf(resumeData),
+      buildCoverLetterPdf(clData),
       calculateAtsScore(resumeData, job.title ?? '', job.description_text ?? '').catch(err => {
         console.error('ATS score failed (non-fatal):', err)
         return null
@@ -100,8 +100,8 @@ export async function POST(
 
   const zip = new JSZip()
   const folder = zip.folder(folderName)!
-  folder.file(`${filePrefix}_Resume.docx`,       resumeDocx)
-  folder.file(`${filePrefix}_Cover_Letter.docx`, clDocx)
+  folder.file(`${filePrefix}_Resume.pdf`,       resumePdf)
+  folder.file(`${filePrefix}_Cover_Letter.pdf`, clPdf)
 
   const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 

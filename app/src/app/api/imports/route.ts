@@ -99,10 +99,15 @@ export async function POST(request: NextRequest) {
   if (!Array.isArray(keyword_set_ids) || keyword_set_ids.length === 0)
     return NextResponse.json({ error: 'At least one keyword set is required' }, { status: 400 })
 
-  // Load actor config
+  // Load actor config — fall back to known defaults if not explicitly configured
+  const DEFAULTS: Record<string, string> = {
+    seek:   'websift/seek-job-scraper',
+    indeed: 'misceres/indeed-scraper',
+  }
   const { data: actor } = await supabase
     .from('apify_actors').select('*').eq('user_id', user.id).eq('source', source).single()
-  if (!actor?.actor_id?.trim())
+  const actorId = actor?.actor_id?.trim() || DEFAULTS[source]
+  if (!actorId)
     return NextResponse.json({ error: `Apify actor not configured for ${source}. Go to Settings → Apify Actors.` }, { status: 400 })
 
   // Load keyword sets
@@ -126,7 +131,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Apify actor IDs use '~' instead of '/'
-  const actorIdForUrl = actor.actor_id.replace('/', '~')
+  const actorIdForUrl = actorId.replace('/', '~')
   let apifyRunId: string
   try {
     const resp = await fetch(`https://api.apify.com/v2/acts/${actorIdForUrl}/runs`, {

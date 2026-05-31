@@ -13,10 +13,10 @@ function SetSection({
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<KeywordSet | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
-  // Prompt state: id → { loading, prompt, editText, editing, saving, error, savedSource }
+  // Prompt state: id → { loading, prompt, editText, editing, saving, error, savedSource, deleted }
   const [promptState, setPromptState] = useState<Record<string, {
     loading: boolean; prompt?: string; editText?: string; editing?: boolean;
-    saving?: boolean; error?: string; savedSource?: string
+    saving?: boolean; error?: string; savedSource?: string; deleted?: boolean
   }>>({})
 
   async function loadPrompt(id: string) {
@@ -54,7 +54,8 @@ function SetSection({
 
   async function deletePrompt(id: string) {
     if (!confirm('Delete saved prompt? The next scoring run will regenerate it fresh from your current profile.')) return
-    setPromptState(p => ({ ...p, [id]: { ...p[id], saving: true } }))
+    // Immediately hide the prompt text while the request is in flight
+    setPromptState(p => ({ ...p, [id]: { loading: false, saving: true } }))
     try {
       const res = await fetch('/api/settings/keywords', {
         method: 'PATCH',
@@ -63,13 +64,13 @@ function SetSection({
       })
       if (!res.ok) {
         const d = await res.json()
-        setPromptState(p => ({ ...p, [id]: { ...p[id], saving: false, error: d.error ?? 'Delete failed' } }))
+        setPromptState(p => ({ ...p, [id]: { loading: false, saving: false, error: d.error ?? 'Delete failed' } }))
       } else {
-        // Clear prompt from local state — next load will recompute from profile
-        setPromptState(p => ({ ...p, [id]: { loading: false } }))
+        // Show ✓ deleted confirmation; user can Load Prompt again to see the recomputed version
+        setPromptState(p => ({ ...p, [id]: { loading: false, deleted: true } }))
       }
     } catch (e) {
-      setPromptState(p => ({ ...p, [id]: { ...p[id], saving: false, error: String(e) } }))
+      setPromptState(p => ({ ...p, [id]: { loading: false, saving: false, error: String(e) } }))
     }
   }
 
@@ -202,10 +203,15 @@ function SetSection({
                     <div>
                       <div className="flex items-center gap-3 mb-1.5 flex-wrap">
                         <p className="text-xs font-medium text-gray-400">⚡ Job-fit Scoring Prompt</p>
-                        {promptState[s.id]?.savedSource === 'saved' && (
+                        {promptState[s.id]?.savedSource === 'saved' && !promptState[s.id]?.deleted && (
                           <span className="text-xs text-green-400 bg-green-950 border border-green-800 px-1.5 py-0.5 rounded">Saved</span>
                         )}
-                        {!promptState[s.id]?.prompt && !promptState[s.id]?.editing && (
+                        {/* Saving/deleting spinner */}
+                        {promptState[s.id]?.saving && (
+                          <span className="text-xs text-gray-500 italic">Deleting…</span>
+                        )}
+                        {/* Load Prompt button — shown when no prompt loaded and not in deleted/saving state */}
+                        {!promptState[s.id]?.prompt && !promptState[s.id]?.editing && !promptState[s.id]?.saving && !promptState[s.id]?.deleted && (
                           <button
                             onClick={() => loadPrompt(s.id)}
                             disabled={promptState[s.id]?.loading}
@@ -214,6 +220,7 @@ function SetSection({
                             {promptState[s.id]?.loading ? 'Loading…' : 'Load Prompt'}
                           </button>
                         )}
+                        {/* Edit / Delete buttons — shown when prompt is loaded */}
                         {promptState[s.id]?.prompt && !promptState[s.id]?.editing && (
                           <>
                             <button
@@ -232,11 +239,25 @@ function SetSection({
                             </button>
                           </>
                         )}
+                        {/* Load Prompt button after a successful delete */}
+                        {promptState[s.id]?.deleted && (
+                          <button
+                            onClick={() => loadPrompt(s.id)}
+                            disabled={promptState[s.id]?.loading}
+                            className="px-2 py-0.5 bg-purple-800 hover:bg-purple-700 disabled:opacity-50 text-purple-200 text-xs rounded"
+                          >
+                            {promptState[s.id]?.loading ? 'Loading…' : 'Load Prompt'}
+                          </button>
+                        )}
                       </div>
                       {promptState[s.id]?.error && (
-                        <p className="text-red-400 text-xs italic mb-1">{promptState[s.id].error}</p>
+                        <p className="text-red-400 text-xs bg-red-950 border border-red-800 rounded px-2 py-1 mb-1">{promptState[s.id].error}</p>
                       )}
-                      {promptState[s.id]?.editing ? (
+                      {promptState[s.id]?.deleted ? (
+                        <p className="text-green-400 text-xs bg-green-950 border border-green-800 rounded px-2 py-1.5">
+                          ✓ Prompt deleted. Next scoring run will regenerate it fresh from your profile.
+                        </p>
+                      ) : promptState[s.id]?.editing ? (
                         <div className="space-y-2">
                           <textarea
                             value={promptState[s.id].editText ?? ''}
@@ -265,7 +286,7 @@ function SetSection({
                         <pre className="text-xs text-gray-300 bg-gray-950 border border-gray-700 rounded-lg p-3 whitespace-pre-wrap font-mono leading-relaxed max-h-72 overflow-y-auto">
                           {promptState[s.id].prompt}
                         </pre>
-                      ) : !promptState[s.id]?.error && !promptState[s.id]?.loading && (
+                      ) : !promptState[s.id]?.error && !promptState[s.id]?.loading && !promptState[s.id]?.saving && (
                         <p className="text-gray-600 text-xs italic">Click "Load Prompt" to view and edit the AI scoring instructions for this category.</p>
                       )}
                     </div>

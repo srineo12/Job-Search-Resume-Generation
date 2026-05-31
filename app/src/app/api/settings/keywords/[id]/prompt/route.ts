@@ -20,16 +20,22 @@ export async function GET(
 
   const { id } = await params
 
-  // Load keyword set — also grab saved jobfit_prompt if user has edited it
+  // Load keyword set — use select('*') to avoid failing if jobfit_prompt column
+  // doesn't exist yet on the production DB (migration may not have been applied).
   const { data: kwSet, error: kwErr } = await supabase
     .from('keyword_sets')
-    .select('id, name, keywords, jobfit_prompt')
+    .select('*')
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
 
-  if (kwErr || !kwSet)
-    return NextResponse.json({ error: 'Keyword set not found' }, { status: 404 })
+  if (kwErr || !kwSet) {
+    console.error('keyword_sets lookup failed:', kwErr?.message)
+    return NextResponse.json(
+      { error: kwErr ? `DB error: ${kwErr.message}` : 'Keyword set not found' },
+      { status: kwErr ? 500 : 404 }
+    )
+  }
 
   // If a user-saved prompt exists in DB, return it directly
   if (kwSet.jobfit_prompt) {

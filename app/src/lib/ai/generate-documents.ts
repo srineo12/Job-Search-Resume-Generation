@@ -431,7 +431,7 @@ CANDIDATE CONTEXT:
 - Most recent role: ${recentRole}
 - Target category: "${categoryName}" (${categoryKeywords.join(', ')})
 - Transferable strengths: ${skills || 'see profile'}
-- Certifications: ${certs || 'none listed'} (all listed certifications are complete and currently valid)
+- Certifications: ${certs || 'none listed'}
 - Rights / availability: ${rights}
 
 SCORING BANDS:

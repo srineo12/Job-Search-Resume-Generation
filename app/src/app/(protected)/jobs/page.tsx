@@ -432,8 +432,8 @@ export default function JobsPage() {
       // ── Path A: score specific selected jobs — loop until all done ──
       setScoreMsg(`Scoring ${jobIds.length} selected job${jobIds.length > 1 ? 's' : ''}…`)
       try {
-        // Send all IDs but keep batches of 5 to avoid OpenAI timeouts
-        const batchSize = 5
+        // Batch size 3: safe for parallel execution within Vercel Hobby's 10s function limit
+        const batchSize = 3
         let remaining = [...jobIds]
         while (remaining.length > 0) {
           const batch = remaining.slice(0, batchSize)
@@ -473,29 +473,69 @@ export default function JobsPage() {
     setTimeout(() => { setScoring(false); setScoreMsg('') }, 5000)
   }
 
-  // Helper: loops /api/jobs/jobfit until remaining === 0 or nothing scores
+  // Helper: loops /api/jobs/jobfit until remaining === 0 or safety limits hit.
+  // Tolerates individual-job errors — only stops if the API itself fails (network/server)
+  // or 5 consecutive batches score 0 (prevents infinite loops on persistent failures).
   async function scoreAllUnscored(
     categoryId: string,
     onProgress: (total: number, msg: string) => void,
   ) {
     let total = 0
-    let maxRounds = 60 // safety cap — 60 × 5 = 300 jobs max
-    while (maxRounds-- > 0) {
-      onProgress(total, `Scoring… ${total} done`)
-      const res = await fetch('/api/jobs/jobfit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword_set_id: categoryId, limit: 5 }),
-      })
-      const d = await res.json()
-      if (!res.ok) { onProgress(total, `⚠️ ${d.error ?? 'Scoring failed'}`); return }
-      total += d.scored || 0
-      if (d.remaining === 0) break                        // all done
-      if (!d.scored && d.errors === 0) break              // nothing to score
-      if (!d.scored && d.errors > 0) {                    // errors but nothing scored — stop looping
-        onProgress(total, `⚠️ ${d.message}`); return
+    let totalErrors = 0
+    let consecutiveEmpty = 0
+    const MAX_ROUNDS = 200        // safety cap — 200 × 3 = 600 jobs max
+    const MAX_CONSECUTIVE_EMPTY = 5  // stop after 5 batches that scored nothing
+
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      onProgress(total, `Scoring… ${total} scored${totalErrors > 0 ? `, ${totalErrors} errors` : ''}`)
+
+      let res: Response, d: Record<string, unknown>
+      try {
+        res = await fetch('/api/jobs/jobfit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keyword_set_id: categoryId, limit: 3 }),
+        })
+        d = await res.json()
+      } catch (fetchErr) {
+        // Network error (e.g. Vercel timeout) — wait a moment and retry up to 3 times
+        onProgress(total, `⚠️ Network error, retrying… (${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)})`)
+        await new Promise(r => setTimeout(r, 2000))
+        consecutiveEmpty++
+        if (consecutiveEmpty >= MAX_CONSECUTIVE_EMPTY) {
+          onProgress(total, `⚠️ Stopped after ${MAX_CONSECUTIVE_EMPTY} consecutive network errors`)
+          return total
+        }
+        continue
       }
-      onProgress(total, `Scored ${total}… ${d.remaining} remaining`)
+
+      if (!res.ok) {
+        onProgress(total, `⚠️ Server error: ${d.error ?? res.statusText}`)
+        return total
+      }
+
+      const batchScored = Number(d.scored) || 0
+      const batchErrors = Number(d.errors) || 0
+      total += batchScored
+      totalErrors += batchErrors
+
+      if (d.remaining === 0) break   // all done
+
+      if (batchScored === 0 && batchErrors === 0) break  // nothing left to score
+
+      if (batchScored === 0) {
+        consecutiveEmpty++
+        if (consecutiveEmpty >= MAX_CONSECUTIVE_EMPTY) {
+          onProgress(total, `⚠️ Stopped — ${MAX_CONSECUTIVE_EMPTY} consecutive batches scored 0 (${totalErrors} total errors)`)
+          return total
+        }
+        // Log errors but keep going — remaining jobs may score fine
+        onProgress(total, `Batch had errors, continuing… ${d.remaining} remaining`)
+        await new Promise(r => setTimeout(r, 1000)) // brief pause before retry
+      } else {
+        consecutiveEmpty = 0  // reset on any success
+        onProgress(total, `Scored ${total}… ${d.remaining} remaining${totalErrors > 0 ? ` (${totalErrors} errors)` : ''}`)
+      }
     }
     return total
   }

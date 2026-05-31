@@ -1,8 +1,9 @@
 export const runtime = 'nodejs'
+export const maxDuration = 60 // ignored on Vercel Hobby (10s cap), respected on Pro/Enterprise
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
-import { generateResumeData, generateCoverLetterData, generateDocumentFraming, calculateAtsScore, type FullJobData } from '@/lib/ai/generate-documents'
+import { generateResumeData, generateCoverLetterData, calculateAtsScore, type FullJobData } from '@/lib/ai/generate-documents'
 import { buildResumePdf } from '@/lib/render/resume-pdf'
 import { buildCoverLetterPdf } from '@/lib/render/cover-letter-pdf'
 import JSZip from 'jszip'
@@ -58,16 +59,16 @@ export async function POST(
     raw_payload:      job.raw_payload as Record<string, unknown> ?? undefined,
   }
 
-  // ── 3. Generate role-specific framing + document content in parallel ──
-  // Step A: AI generates a brief framing note (which angle to take for THIS job category)
-  // Step B: AI generates resume + cover letter content using that framing
-  // Framing failure is non-fatal — documents still generate with base prompts.
+  // ── 3. Generate resume + cover letter in parallel ──
+  // Both calls fire simultaneously. Full job context (description, raw_payload fields)
+  // is in the user message, so the base prompts can self-direct without a framing pre-call.
+  // Removing the framing pre-call saves 3-4s and keeps the route within Vercel Hobby's
+  // 10s function limit.
   let resumeData, clData
   try {
-    const framing = await generateDocumentFraming(profile, jobData)
     ;[resumeData, clData] = await Promise.all([
-      generateResumeData(profile, jobData, undefined, framing.resumeFraming || undefined),
-      generateCoverLetterData(profile, jobData, undefined, framing.coverFraming || undefined),
+      generateResumeData(profile, jobData),
+      generateCoverLetterData(profile, jobData),
     ])
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

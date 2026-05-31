@@ -52,6 +52,27 @@ function SetSection({
     }
   }
 
+  async function deletePrompt(id: string) {
+    if (!confirm('Delete saved prompt? The next scoring run will regenerate it fresh from your current profile.')) return
+    setPromptState(p => ({ ...p, [id]: { ...p[id], saving: true } }))
+    try {
+      const res = await fetch('/api/settings/keywords', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, jobfit_prompt: null }),
+      })
+      if (!res.ok) {
+        const d = await res.json()
+        setPromptState(p => ({ ...p, [id]: { ...p[id], saving: false, error: d.error ?? 'Delete failed' } }))
+      } else {
+        // Clear prompt from local state — next load will recompute from profile
+        setPromptState(p => ({ ...p, [id]: { loading: false } }))
+      }
+    } catch (e) {
+      setPromptState(p => ({ ...p, [id]: { ...p[id], saving: false, error: String(e) } }))
+    }
+  }
+
   async function load() {
     const res = await fetch(`/api/settings/keywords?set_type=${setType}`)
     const d = await res.json()
@@ -194,12 +215,22 @@ function SetSection({
                           </button>
                         )}
                         {promptState[s.id]?.prompt && !promptState[s.id]?.editing && (
-                          <button
-                            onClick={() => setPromptState(p => ({ ...p, [s.id]: { ...p[s.id], editing: true, editText: p[s.id].prompt } }))}
-                            className="px-2 py-0.5 bg-indigo-800 hover:bg-indigo-700 text-indigo-200 text-xs rounded"
-                          >
-                            Edit Prompt
-                          </button>
+                          <>
+                            <button
+                              onClick={() => setPromptState(p => ({ ...p, [s.id]: { ...p[s.id], editing: true, editText: p[s.id].prompt } }))}
+                              className="px-2 py-0.5 bg-indigo-800 hover:bg-indigo-700 text-indigo-200 text-xs rounded"
+                            >
+                              Edit Prompt
+                            </button>
+                            <button
+                              onClick={() => deletePrompt(s.id)}
+                              disabled={promptState[s.id]?.saving}
+                              className="px-2 py-0.5 bg-red-950 hover:bg-red-900 disabled:opacity-50 text-red-400 text-xs rounded"
+                              title="Delete saved prompt — next scoring run regenerates it from your current profile"
+                            >
+                              Delete Prompt
+                            </button>
+                          </>
                         )}
                       </div>
                       {promptState[s.id]?.error && (

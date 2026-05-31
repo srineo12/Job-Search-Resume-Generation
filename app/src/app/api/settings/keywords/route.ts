@@ -48,7 +48,13 @@ export async function PATCH(req: NextRequest) {
     .eq('id', id).eq('user_id', user.id)
     .select().single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    // Give a clear message if the jobfit_prompt column hasn't been migrated yet
+    const msg = error.message.includes('jobfit_prompt')
+      ? 'Database migration needed: run  ALTER TABLE keyword_sets ADD COLUMN IF NOT EXISTS jobfit_prompt text;  in your Supabase SQL editor.'
+      : error.message
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
   return NextResponse.json({ keyword_set: data })
 }
 

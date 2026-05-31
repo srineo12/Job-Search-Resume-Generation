@@ -626,7 +626,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.8.0</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.8.1</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {visibleCounts.total} total · {visibleCounts.hot} hot · {visibleCounts.good} good · {visibleCounts.unranked} unscored
           </p>

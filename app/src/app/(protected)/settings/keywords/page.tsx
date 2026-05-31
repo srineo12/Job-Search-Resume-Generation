@@ -13,8 +13,11 @@ function SetSection({
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<KeywordSet | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
-  // Prompt preview state: id → { loading, prompt, error }
-  const [promptState, setPromptState] = useState<Record<string, { loading: boolean; prompt?: string; error?: string }>>({})
+  // Prompt state: id → { loading, prompt, editText, editing, saving, error, savedSource }
+  const [promptState, setPromptState] = useState<Record<string, {
+    loading: boolean; prompt?: string; editText?: string; editing?: boolean;
+    saving?: boolean; error?: string; savedSource?: string
+  }>>({})
 
   async function loadPrompt(id: string) {
     setPromptState(p => ({ ...p, [id]: { loading: true } }))
@@ -22,9 +25,30 @@ function SetSection({
       const res = await fetch(`/api/settings/keywords/${id}/prompt`)
       const d = await res.json()
       if (!res.ok) setPromptState(p => ({ ...p, [id]: { loading: false, error: d.error ?? 'Failed to load prompt' } }))
-      else setPromptState(p => ({ ...p, [id]: { loading: false, prompt: d.prompt } }))
+      else setPromptState(p => ({ ...p, [id]: { loading: false, prompt: d.prompt, savedSource: d.source } }))
     } catch (e) {
       setPromptState(p => ({ ...p, [id]: { loading: false, error: String(e) } }))
+    }
+  }
+
+  async function savePrompt(id: string) {
+    const text = promptState[id]?.editText
+    if (!text) return
+    setPromptState(p => ({ ...p, [id]: { ...p[id], saving: true } }))
+    try {
+      const res = await fetch('/api/settings/keywords', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, jobfit_prompt: text }),
+      })
+      if (!res.ok) {
+        const d = await res.json()
+        setPromptState(p => ({ ...p, [id]: { ...p[id], saving: false, error: d.error ?? 'Save failed' } }))
+      } else {
+        setPromptState(p => ({ ...p, [id]: { ...p[id], saving: false, editing: false, prompt: text, savedSource: 'saved' } }))
+      }
+    } catch (e) {
+      setPromptState(p => ({ ...p, [id]: { ...p[id], saving: false, error: String(e) } }))
     }
   }
 
@@ -155,27 +179,63 @@ function SetSection({
                 {expanded === s.id && (
                   <div className="mt-3 pt-3 border-t border-gray-800 space-y-3">
                     <div>
-                      <div className="flex items-center gap-3 mb-1.5">
+                      <div className="flex items-center gap-3 mb-1.5 flex-wrap">
                         <p className="text-xs font-medium text-gray-400">⚡ Job-fit Scoring Prompt</p>
-                        {!promptState[s.id]?.prompt && (
+                        {promptState[s.id]?.savedSource === 'saved' && (
+                          <span className="text-xs text-green-400 bg-green-950 border border-green-800 px-1.5 py-0.5 rounded">Saved</span>
+                        )}
+                        {!promptState[s.id]?.prompt && !promptState[s.id]?.editing && (
                           <button
                             onClick={() => loadPrompt(s.id)}
                             disabled={promptState[s.id]?.loading}
                             className="px-2 py-0.5 bg-purple-800 hover:bg-purple-700 disabled:opacity-50 text-purple-200 text-xs rounded"
                           >
-                            {promptState[s.id]?.loading ? 'Loading…' : 'Preview Prompt'}
+                            {promptState[s.id]?.loading ? 'Loading…' : 'Load Prompt'}
+                          </button>
+                        )}
+                        {promptState[s.id]?.prompt && !promptState[s.id]?.editing && (
+                          <button
+                            onClick={() => setPromptState(p => ({ ...p, [s.id]: { ...p[s.id], editing: true, editText: p[s.id].prompt } }))}
+                            className="px-2 py-0.5 bg-indigo-800 hover:bg-indigo-700 text-indigo-200 text-xs rounded"
+                          >
+                            Edit Prompt
                           </button>
                         )}
                       </div>
                       {promptState[s.id]?.error && (
-                        <p className="text-red-400 text-xs italic">{promptState[s.id].error}</p>
+                        <p className="text-red-400 text-xs italic mb-1">{promptState[s.id].error}</p>
                       )}
-                      {promptState[s.id]?.prompt ? (
-                        <pre className="text-xs text-gray-300 bg-gray-950 border border-gray-700 rounded-lg p-3 whitespace-pre-wrap font-mono leading-relaxed max-h-64 overflow-y-auto">
+                      {promptState[s.id]?.editing ? (
+                        <div className="space-y-2">
+                          <textarea
+                            value={promptState[s.id].editText ?? ''}
+                            onChange={e => setPromptState(p => ({ ...p, [s.id]: { ...p[s.id], editText: e.target.value } }))}
+                            rows={18}
+                            className="w-full px-3 py-2 bg-gray-950 border border-indigo-700 rounded-lg text-gray-200 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y leading-relaxed"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => savePrompt(s.id)}
+                              disabled={promptState[s.id]?.saving}
+                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs rounded-lg font-medium"
+                            >
+                              {promptState[s.id]?.saving ? 'Saving…' : 'Save Prompt'}
+                            </button>
+                            <button
+                              onClick={() => setPromptState(p => ({ ...p, [s.id]: { ...p[s.id], editing: false } }))}
+                              className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg"
+                            >
+                              Cancel
+                            </button>
+                            <p className="text-xs text-gray-500 self-center">Changes are saved to DB and used on next scoring run</p>
+                          </div>
+                        </div>
+                      ) : promptState[s.id]?.prompt ? (
+                        <pre className="text-xs text-gray-300 bg-gray-950 border border-gray-700 rounded-lg p-3 whitespace-pre-wrap font-mono leading-relaxed max-h-72 overflow-y-auto">
                           {promptState[s.id].prompt}
                         </pre>
                       ) : !promptState[s.id]?.error && !promptState[s.id]?.loading && (
-                        <p className="text-gray-600 text-xs italic">Click "Preview Prompt" to see the AI scoring instructions generated from your profile + this category.</p>
+                        <p className="text-gray-600 text-xs italic">Click "Load Prompt" to view and edit the AI scoring instructions for this category.</p>
                       )}
                     </div>
                     <div className="flex gap-3">

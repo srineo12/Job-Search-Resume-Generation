@@ -37,10 +37,14 @@ export async function PATCH(req: NextRequest) {
   const { supabase, user } = await getAuth()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { id, name, keywords, is_active } = await req.json()
+  const { id, name, keywords, is_active, jobfit_prompt } = await req.json()
+  // Build update object — only include jobfit_prompt when explicitly provided
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updates: Record<string, any> = { name, keywords, is_active, updated_at: new Date().toISOString() }
+  if (jobfit_prompt !== undefined) updates.jobfit_prompt = jobfit_prompt
   const { data, error } = await supabase
     .from('keyword_sets')
-    .update({ name, keywords, is_active, updated_at: new Date().toISOString() })
+    .update(updates)
     .eq('id', id).eq('user_id', user.id)
     .select().single()
 

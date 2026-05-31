@@ -2,7 +2,7 @@ export const runtime = 'nodejs'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
-import { generateResumeData, generateCoverLetterData, generateDocumentFraming, calculateAtsScore } from '@/lib/ai/generate-documents'
+import { generateResumeData, generateCoverLetterData, generateDocumentFraming, calculateAtsScore, type FullJobData } from '@/lib/ai/generate-documents'
 import { buildResumePdf } from '@/lib/render/resume-pdf'
 import { buildCoverLetterPdf } from '@/lib/render/cover-letter-pdf'
 import JSZip from 'jszip'
@@ -25,17 +25,17 @@ export async function POST(
 
   const { id: jobId } = await params
 
-  // ── 1. Fetch job ──
+  // ── 1. Fetch job — all fields needed for AI generation ──
   const { data: job, error: jobErr } = await supabase
     .from('jobs')
-    .select('id, title, employer, location, description_text, status, source_job_id, url')
+    .select('id, title, employer, location, description_text, description_html, salary_text, work_type, raw_payload, status, source_job_id, url')
     .eq('id', jobId)
     .eq('user_id', user.id)
     .single()
 
   if (jobErr || !job) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
 
-  // ── 2. Fetch candidate profile ──
+  // ── 2. Fetch candidate profile + keyword set data in parallel ──
   const { data: profileRow } = await supabase
     .from('candidate_profile')
     .select('profile_json')
@@ -47,11 +47,15 @@ export async function POST(
   }
   const profile = profileRow.profile_json as Record<string, unknown>
 
-  const jobData = {
+  const jobData: FullJobData = {
     title:            job.title ?? '',
     employer:         job.employer ?? '',
     location:         job.location ?? '',
     description_text: job.description_text ?? '',
+    description_html: job.description_html ?? undefined,
+    salary_text:      job.salary_text ?? undefined,
+    work_type:        job.work_type ?? undefined,
+    raw_payload:      job.raw_payload as Record<string, unknown> ?? undefined,
   }
 
   // ── 3. Generate role-specific framing + document content in parallel ──

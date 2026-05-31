@@ -20,10 +20,10 @@ export async function GET(
 
   const { id } = await params
 
-  // Load keyword set
+  // Load keyword set — also grab saved jobfit_prompt if user has edited it
   const { data: kwSet, error: kwErr } = await supabase
     .from('keyword_sets')
-    .select('id, name, keywords')
+    .select('id, name, keywords, jobfit_prompt')
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
@@ -31,7 +31,12 @@ export async function GET(
   if (kwErr || !kwSet)
     return NextResponse.json({ error: 'Keyword set not found' }, { status: 404 })
 
-  // Load candidate profile
+  // If a user-saved prompt exists in DB, return it directly
+  if (kwSet.jobfit_prompt) {
+    return NextResponse.json({ prompt: kwSet.jobfit_prompt, source: 'saved' })
+  }
+
+  // Otherwise compute it from the profile
   const { data: profileRow } = await supabase
     .from('candidate_profile')
     .select('profile_json')
@@ -46,5 +51,5 @@ export async function GET(
 
   const prompt = buildJobfitScoringPrompt(profile, kwSet.name, categoryKeywords)
 
-  return NextResponse.json({ prompt })
+  return NextResponse.json({ prompt, source: 'computed' })
 }

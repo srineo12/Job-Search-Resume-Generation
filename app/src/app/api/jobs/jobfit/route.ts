@@ -33,10 +33,10 @@ export async function POST(request: NextRequest) {
   if (!keyword_set_id)
     return NextResponse.json({ error: 'keyword_set_id is required' }, { status: 400 })
 
-  // ── 1. Load keyword set (category) ──
+  // ── 1. Load keyword set (category) — include saved prompt if user has edited it ──
   const { data: kwSet, error: kwErr } = await supabase
     .from('keyword_sets')
-    .select('id, name, keywords')
+    .select('id, name, keywords, jobfit_prompt')
     .eq('id', keyword_set_id)
     .eq('user_id', user.id)
     .single()
@@ -60,18 +60,22 @@ export async function POST(request: NextRequest) {
 
   const profile = profileRow.profile_json as Record<string, unknown>
 
-  // ── 3. Build scoring prompt — deterministic, guaranteed correct JSON schema ──
+  // ── 3. Build scoring prompt ──
+  // Use the user-edited prompt from DB if available; otherwise build it deterministically.
   const categoryKeywords = Array.isArray(kwSet.keywords) ? kwSet.keywords as string[] : []
-  const scoringPrompt = buildJobfitScoringPrompt(profile, kwSet.name, categoryKeywords)
+  const scoringPrompt = kwSet.jobfit_prompt
+    ? String(kwSet.jobfit_prompt)
+    : buildJobfitScoringPrompt(profile, kwSet.name, categoryKeywords)
 
-  // Save prompt to keyword_sets so Settings → Keywords can display it.
-  // Silently ignore if the column doesn't exist yet (migration not applied).
-  const { error: promptSaveErr } = await supabase
-    .from('keyword_sets')
-    .update({ jobfit_prompt: scoringPrompt })
-    .eq('id', keyword_set_id)
-    .eq('user_id', user.id)
-  if (promptSaveErr) console.warn('jobfit_prompt save skipped:', promptSaveErr.message)
+  // If we just computed it (no saved version), persist it so the user can see/edit it.
+  if (!kwSet.jobfit_prompt) {
+    const { error: promptSaveErr } = await supabase
+      .from('keyword_sets')
+      .update({ jobfit_prompt: scoringPrompt })
+      .eq('id', keyword_set_id)
+      .eq('user_id', user.id)
+    if (promptSaveErr) console.warn('jobfit_prompt save skipped:', promptSaveErr.message)
+  }
 
   // ── 4. Find imports that used this keyword set ──
   // Only score jobs from imports associated with the selected category.
@@ -87,7 +91,7 @@ export async function POST(request: NextRequest) {
   // ── 5. Load jobs to score ──
   let query = supabase
     .from('jobs')
-    .select('id, title, employer, location, work_type, salary_text, description_text, posted_at, status')
+    .select('id, title, employer, location, work_type, salary_text, description_text, description_html, raw_payload, posted_at, status')
     .eq('user_id', user.id)
     .neq('status', 'skipped')
     .limit(limit)
@@ -121,14 +125,25 @@ export async function POST(request: NextRequest) {
 
   for (const job of jobs) {
     try {
-      const jobDesc = [
+      const rp = (job.raw_payload ?? {}) as Record<string, unknown>
+      const rpContent = rp.content as Record<string, unknown> | undefined
+      const parts = [
         `Title: ${job.title || 'Unknown'}`,
         `Employer: ${job.employer || 'Unknown'}`,
         `Location: ${job.location || 'Melbourne VIC'}`,
-        `Work Type: ${job.work_type || 'Not specified'}`,
-        `Salary: ${job.salary_text || 'Not specified'}`,
-        `Description:\n${(job.description_text || '').slice(0, 4000)}`,
-      ].join('\n')
+        `Work Type: ${rp.workTypes as string || job.work_type || 'Not specified'}`,
+        `Work Arrangement: ${rp.workArrangements as string || 'Not specified'}`,
+        `Salary: ${rp.salary as string || job.salary_text || 'Not specified'}`,
+        rp.numApplicants != null ? `Applicants: ${rp.numApplicants}` : '',
+        rp.classificationInfo ? `Classification: ${(rp.classificationInfo as Record<string,string>).classification} / ${(rp.classificationInfo as Record<string,string>).subClassification}` : '',
+        rpContent?.jobHook ? `Job Hook: "${rpContent.jobHook}"` : '',
+        rpContent?.bulletPoints && Array.isArray(rpContent.bulletPoints) && rpContent.bulletPoints.length
+          ? `Key Points:\n${(rpContent.bulletPoints as string[]).map(b => `• ${b}`).join('\n')}` : '',
+        rp.employerQuestions && Array.isArray(rp.employerQuestions) && (rp.employerQuestions as string[]).length
+          ? `Employer Questions:\n${(rp.employerQuestions as string[]).map(q => `• ${q}`).join('\n')}` : '',
+        job.description_text ? `Full Description:\n${job.description_text}` : '',
+      ].filter(Boolean)
+      const jobDesc = parts.join('\n')
 
       const completion = await openai.chat.completions.create({
         model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',

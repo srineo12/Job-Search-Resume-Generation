@@ -101,26 +101,39 @@ interface ColDef {
 }
 
 const ALL_COLS: ColDef[] = [
-  { key: 'source_job_id',     label: 'Job ID',      defaultWidth: 90,  sortable: true,  filterable: true,  filterType: 'text' },
-  { key: 'title',             label: 'Job Title',   defaultWidth: 230, sortable: true,  filterable: true,  filterType: 'text', sticky: true },
-  { key: 'employer',          label: 'Employer',    defaultWidth: 140, sortable: true,  filterable: true,  filterType: 'text' },
-  { key: 'location',          label: 'Location',    defaultWidth: 160, sortable: true,  filterable: true,  filterType: 'text' },
-  { key: 'role_description',  label: 'Role',        defaultWidth: 190, sortable: false, filterable: false, filterType: 'text' },
-  { key: 'ranking_comments',  label: 'Why',         defaultWidth: 190, sortable: false, filterable: false, filterType: 'text' },
-  { key: 'ai_score',          label: 'Score',       defaultWidth: 65,  sortable: true,  filterable: true,  filterType: 'range' },
-  { key: 'ats_score',         label: 'ATS',         defaultWidth: 65,  sortable: true,  filterable: true,  filterType: 'range' },
-  { key: 'ai_priority',       label: 'Priority',    defaultWidth: 95,  sortable: true,  filterable: true,  filterType: 'select', filterOptions: ['hot','good','maybe','avoid'] },
-  { key: 'workflow_status',   label: 'Status',      defaultWidth: 160, sortable: true,  filterable: true,  filterType: 'select', filterOptions: ['open','generated','applied','discarded'] },
-  { key: 'salary_text',       label: 'Salary',      defaultWidth: 145, sortable: false, filterable: true,  filterType: 'text' },
-  { key: 'work_type',         label: 'Type',        defaultWidth: 100, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
-  { key: 'arrangement',       label: 'Arrangement', defaultWidth: 115, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
-  { key: 'applicants',        label: 'Applicants',  defaultWidth: 90,  sortable: true,  filterable: false, filterType: 'text' },
-  { key: 'posted_at',         label: 'Posted',      defaultWidth: 80,  sortable: true,  filterable: false, filterType: 'text' },
-  { key: 'imported_at',       label: 'Fetched',     defaultWidth: 80,  sortable: true,  filterable: false, filterType: 'text' },
-  { key: 'category',          label: 'Category',    defaultWidth: 130, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
+  { key: 'source_job_id',       label: 'Job ID',         defaultWidth: 90,  sortable: true,  filterable: true,  filterType: 'text' },
+  { key: 'title',               label: 'Job Title',      defaultWidth: 230, sortable: true,  filterable: true,  filterType: 'text', sticky: true },
+  { key: 'employer',            label: 'Employer',       defaultWidth: 140, sortable: true,  filterable: true,  filterType: 'text' },
+  { key: 'location',            label: 'Location',       defaultWidth: 160, sortable: true,  filterable: true,  filterType: 'text' },
+  { key: 'role_description',    label: 'Role',           defaultWidth: 190, sortable: false, filterable: false, filterType: 'text' },
+  { key: 'ranking_comments',    label: 'Why',            defaultWidth: 190, sortable: false, filterable: false, filterType: 'text' },
+  { key: 'ai_score',            label: 'Score',          defaultWidth: 65,  sortable: true,  filterable: true,  filterType: 'range' },
+  { key: 'ats_score',           label: 'ATS',            defaultWidth: 65,  sortable: true,  filterable: true,  filterType: 'range' },
+  { key: 'ai_priority',         label: 'Priority',       defaultWidth: 95,  sortable: true,  filterable: true,  filterType: 'select', filterOptions: ['hot','good','maybe','avoid'] },
+  { key: 'workflow_status',     label: 'Status',         defaultWidth: 160, sortable: true,  filterable: true,  filterType: 'select', filterOptions: ['open','generated','applied','discarded'] },
+  { key: 'recommended_action',  label: 'Action',         defaultWidth: 110, sortable: false, filterable: false, filterType: 'text' },
+  { key: 'tailoring_notes',     label: 'Tailoring Tips', defaultWidth: 200, sortable: false, filterable: false, filterType: 'text' },
+  { key: 'red_flags',           label: 'Red Flags',      defaultWidth: 170, sortable: false, filterable: false, filterType: 'text' },
+  { key: 'salary_text',         label: 'Salary',         defaultWidth: 145, sortable: false, filterable: true,  filterType: 'text' },
+  { key: 'work_type',           label: 'Type',           defaultWidth: 100, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
+  { key: 'arrangement',         label: 'Arrangement',    defaultWidth: 115, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
+  { key: 'applicants',          label: 'Applicants',     defaultWidth: 90,  sortable: true,  filterable: false, filterType: 'text' },
+  { key: 'source',              label: 'Source',         defaultWidth: 80,  sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
+  { key: 'posted_at',           label: 'Posted',         defaultWidth: 80,  sortable: true,  filterable: false, filterType: 'text' },
+  { key: 'imported_at',         label: 'Fetched',        defaultWidth: 80,  sortable: true,  filterable: false, filterType: 'text' },
+  { key: 'category',            label: 'Category',       defaultWidth: 130, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
 ]
 
-const LS_KEY = 'jobs-col-layout-v3'
+const LS_KEY = 'jobs-col-layout-v4'
+const LS_FONT_KEY = 'jobs-font-size'
+
+function loadFontSize(): number {
+  if (typeof window === 'undefined') return 12
+  try { const s = localStorage.getItem(LS_FONT_KEY); return s ? Math.max(10, Math.min(20, Number(s))) : 12 } catch { return 12 }
+}
+function saveFontSize(size: number) {
+  try { localStorage.setItem(LS_FONT_KEY, String(size)) } catch {}
+}
 
 function loadLayout() {
   if (typeof window === 'undefined') return null
@@ -196,6 +209,32 @@ export default function JobsPage() {
   const [colWidths, setColWidths] = useState<Record<string,number>>(saved?.widths ?? Object.fromEntries(ALL_COLS.map(c => [c.key, c.defaultWidth])))
   const [layoutSaved, setLayoutSaved] = useState(false)
 
+  // Font size
+  const [fontSize, setFontSize] = useState<number>(12)
+  useEffect(() => { setFontSize(loadFontSize()) }, [])
+  function changeFontSize(delta: number) {
+    setFontSize(prev => {
+      const next = Math.max(10, Math.min(20, prev + delta))
+      saveFontSize(next)
+      return next
+    })
+  }
+
+  // Hover tooltip for title / role / why columns
+  const [hoverTooltip, setHoverTooltip] = useState<{
+    heading: string; lines: string[]; x: number; y: number
+  } | null>(null)
+  const tooltipTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function showTooltip(e: React.MouseEvent, heading: string, lines: string[]) {
+    if (tooltipTimeout.current) clearTimeout(tooltipTimeout.current)
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setHoverTooltip({ heading, lines, x: rect.left, y: rect.bottom + 6 })
+  }
+  function hideTooltip() {
+    tooltipTimeout.current = setTimeout(() => setHoverTooltip(null), 80)
+  }
+
   // Drag for reorder
   const dragFrom = useRef<string | null>(null)
 
@@ -261,6 +300,7 @@ export default function JobsPage() {
       else if (sortKey === 'title')     { av = a.title; bv = b.title }
       else if (sortKey === 'location')  { av = a.location; bv = b.location }
       else if (sortKey === 'category')  { av = a.category; bv = b.category }
+      else if (sortKey === 'source')    { av = a.source; bv = b.source }
       else if (sortKey === 'ai_priority') { const o={hot:4,good:3,maybe:2,avoid:1} as Record<string,number>; av=o[a.ai_priority??'']??0; bv=o[b.ai_priority??'']??0 }
       else if (sortKey === 'workflow_status') { av = wfOf(a.status); bv = wfOf(b.status) }
       else if (sortKey === 'applicants') { av = a.raw_payload?.numApplicants ?? -1; bv = b.raw_payload?.numApplicants ?? -1 }
@@ -274,6 +314,7 @@ export default function JobsPage() {
   const categories   = [...new Set(jobs.map(j => j.category).filter(Boolean))].sort()
   const workTypes    = [...new Set(jobs.map(j => j.work_type).filter(Boolean))]
   const arrangements = [...new Set(jobs.map(j => j.raw_payload?.workArrangements as string).filter(Boolean))]
+  const sources      = [...new Set(jobs.map(j => j.source).filter(Boolean))].sort()
 
   // ── Counts derived from visible rows (respects all active filters) ─────────
   const visibleCounts = {
@@ -545,7 +586,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.7.9</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.8.0</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {visibleCounts.total} total · {visibleCounts.hot} hot · {visibleCounts.good} good · {visibleCounts.unranked} unscored
           </p>
@@ -603,6 +644,12 @@ export default function JobsPage() {
             className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${layoutSaved ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
             {layoutSaved ? '✓ Saved' : '💾 Save Layout'}
           </button>
+          {/* Font size controls */}
+          <div className="flex items-center gap-1 bg-gray-800 rounded-lg border border-gray-700 px-2 py-1">
+            <button onClick={() => changeFontSize(-1)} className="text-gray-400 hover:text-white w-5 text-center font-bold text-sm leading-none">−</button>
+            <span className="text-gray-400 text-xs w-8 text-center">{fontSize}px</span>
+            <button onClick={() => changeFontSize(1)} className="text-gray-400 hover:text-white w-5 text-center font-bold text-sm leading-none">+</button>
+          </div>
         </div>
       </div>
 
@@ -676,7 +723,7 @@ export default function JobsPage() {
         </div>
       ) : (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
-          <table className="text-xs border-collapse" style={{ tableLayout: 'fixed', width: colOrder.reduce((s,k) => s + (colWidths[k]??120), 48) + 'px' }}>
+          <table className="border-collapse" style={{ tableLayout: 'fixed', fontSize: fontSize + 'px', width: colOrder.reduce((s,k) => s + (colWidths[k]??120), 48) + 'px' }}>
             {/* col widths */}
             <colgroup>
               <col style={{ width: 40 }} />
@@ -740,7 +787,7 @@ export default function JobsPage() {
                         onChange={e => setColFilters(p => ({ ...p, [col.key]: e.target.value }))}
                         className="w-full bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white text-xs focus:outline-none focus:border-indigo-500">
                         <option value="">All</option>
-                        {(col.key === 'work_type' ? workTypes : col.key === 'arrangement' ? arrangements : col.key === 'category' ? categories : col.filterOptions ?? []).map(o => (
+                        {(col.key === 'work_type' ? workTypes : col.key === 'arrangement' ? arrangements : col.key === 'category' ? categories : col.key === 'source' ? sources : col.filterOptions ?? []).map(o => (
                           <option key={o} value={o}>{o}</option>
                         ))}
                       </select>
@@ -790,12 +837,18 @@ export default function JobsPage() {
                             </td>
 
                           case 'title':
-                            return <td key={col.key} className={`px-2 py-2 overflow-hidden ${stickyCls}`} style={isSticky ? { left: 40 } : {}}>
+                            return <td key={col.key} className={`px-2 py-2 overflow-hidden ${stickyCls}`} style={isSticky ? { left: 40 } : {}}
+                              onMouseEnter={e => {
+                                const lines = [job.title || '(no title)', job.ai_ranking?.reason, job.employer, job.location].filter(Boolean) as string[]
+                                showTooltip(e, 'Job Title', lines)
+                              }}
+                              onMouseLeave={hideTooltip}>
                               <a href={job.url} target="_blank" rel="noopener noreferrer"
-                                className="text-white font-medium hover:text-indigo-300 transition-colors block truncate"
-                                title={job.title}>{job.title || '(no title)'}</a>
+                                className="text-white font-medium hover:text-indigo-300 transition-colors block truncate">
+                                {job.title || '(no title)'}
+                              </a>
                               {job.ai_ranking?.reason && (
-                                <p className="text-gray-500 text-xs mt-0.5 truncate italic" title={job.ai_ranking.reason}>{job.ai_ranking.reason}</p>
+                                <p className="text-gray-500 text-xs mt-0.5 truncate italic">{job.ai_ranking.reason}</p>
                               )}
                             </td>
 
@@ -814,18 +867,54 @@ export default function JobsPage() {
 
                           case 'role_description': {
                             const rd = job.ai_ranking?.role_description?.map(stripBulletPrefix) ?? []
-                            return <td key={col.key} className="px-2 py-2 text-white overflow-hidden">
+                            return <td key={col.key} className="px-2 py-2 text-white overflow-hidden cursor-default"
+                              onMouseEnter={e => rd.length && showTooltip(e, 'Role Description', rd)}
+                              onMouseLeave={hideTooltip}>
                               {rd.length
-                                ? <span className="block truncate" title={rd.join('\n')}>{rd[0]}</span>
+                                ? <span className="block truncate">{rd[0]}</span>
                                 : <span className="text-gray-600">—</span>}
                             </td>
                           }
 
                           case 'ranking_comments': {
                             const rc = job.ai_ranking?.ranking_comments?.map(stripBulletPrefix) ?? []
-                            return <td key={col.key} className="px-2 py-2 text-white overflow-hidden">
+                            return <td key={col.key} className="px-2 py-2 text-white overflow-hidden cursor-default"
+                              onMouseEnter={e => rc.length && showTooltip(e, 'Why This Score', rc)}
+                              onMouseLeave={hideTooltip}>
                               {rc.length
-                                ? <span className="block truncate" title={rc.join('\n')}>{rc[0]}</span>
+                                ? <span className="block truncate">{rc[0]}</span>
+                                : <span className="text-gray-600">—</span>}
+                            </td>
+                          }
+
+                          case 'recommended_action':
+                            return <td key={col.key} className="px-2 py-2 text-white overflow-hidden">
+                              {job.ai_ranking?.recommended_action
+                                ? <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                                    job.ai_ranking.recommended_action === 'apply' ? 'bg-green-900 text-green-300' :
+                                    job.ai_ranking.recommended_action === 'skip'  ? 'bg-red-950 text-red-400' :
+                                    'bg-yellow-900 text-yellow-300'}`}>
+                                    {job.ai_ranking.recommended_action.replace(/_/g, ' ')}
+                                  </span>
+                                : <span className="text-gray-600">—</span>}
+                            </td>
+
+                          case 'tailoring_notes': {
+                            const tn = job.ai_ranking?.tailoring_notes
+                            return <td key={col.key} className="px-2 py-2 text-white overflow-hidden cursor-default"
+                              onMouseEnter={e => tn && showTooltip(e, 'Tailoring Tips', [tn])}
+                              onMouseLeave={hideTooltip}>
+                              {tn ? <span className="block truncate text-blue-300">{tn}</span> : <span className="text-gray-600">—</span>}
+                            </td>
+                          }
+
+                          case 'red_flags': {
+                            const rf = job.ai_ranking?.red_flags
+                            return <td key={col.key} className="px-2 py-2 text-white overflow-hidden cursor-default"
+                              onMouseEnter={e => rf && rf !== 'none' && showTooltip(e, 'Red Flags', [rf])}
+                              onMouseLeave={hideTooltip}>
+                              {rf && rf !== 'none'
+                                ? <span className="block truncate text-red-400">{rf}</span>
                                 : <span className="text-gray-600">—</span>}
                             </td>
                           }
@@ -902,6 +991,11 @@ export default function JobsPage() {
 
                           case 'imported_at':
                             return <td key={col.key} className="px-2 py-2 text-white">{relDate(job.created_at)}</td>
+
+                          case 'source':
+                            return <td key={col.key} className="px-2 py-2 text-white">
+                              {job.source ? <span className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-300 text-xs border border-gray-700">{job.source}</span> : <span className="text-gray-600">—</span>}
+                            </td>
 
                           default:
                             return <td key={col.key} className="px-2 py-2 text-gray-600">—</td>
@@ -1061,6 +1155,28 @@ export default function JobsPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* ── Hover tooltip overlay ── */}
+      {hoverTooltip && (
+        <div
+          style={{
+            position: 'fixed',
+            top: Math.min(hoverTooltip.y, window.innerHeight - 320),
+            left: Math.min(Math.max(8, hoverTooltip.x), window.innerWidth - 620),
+            width: 600,
+            zIndex: 10000,
+          }}
+          className="bg-gray-800 border border-gray-500 rounded-2xl p-6 shadow-2xl pointer-events-none"
+          onMouseLeave={hideTooltip}
+        >
+          <p className="text-gray-400 text-sm font-semibold uppercase tracking-wider mb-3">{hoverTooltip.heading}</p>
+          <div className="space-y-2">
+            {hoverTooltip.lines.map((line, i) => (
+              <p key={i} className="text-white text-base leading-relaxed">{line}</p>
+            ))}
+          </div>
         </div>
       )}
 

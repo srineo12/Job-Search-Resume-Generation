@@ -1,8 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { usePathname } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
 
 const navItems = [
@@ -13,21 +12,11 @@ const navItems = [
 
 const settingsItems = [
   { href: '/settings/profile', label: 'Profile', icon: '👤' },
-  { href: '/settings/style', label: 'Style', icon: '🎨' },
   { href: '/settings/keywords', label: 'Keyword Sets', icon: '🔑' },
-  { href: '/settings/actors', label: 'Apify Actors', icon: '🕷️' },
-  { href: '/settings/integrations', label: 'Integrations', icon: '🔗' },
 ]
 
 export default function Sidebar({ user }: { user: User }) {
   const pathname = usePathname()
-  const router = useRouter()
-
-  async function handleSignOut() {
-    const supabase = createClient()
-    await supabase.auth.signOut()
-    router.push('/login')
-  }
 
   return (
     <aside className="fixed left-0 top-0 h-full w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
@@ -52,16 +41,9 @@ export default function Sidebar({ user }: { user: User }) {
         ))}
       </nav>
 
-      {/* Sign out + version */}
-      <div className="px-3 py-4 border-t border-gray-800 space-y-2">
-        <button
-          onClick={handleSignOut}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors text-sm"
-        >
-          <span>🚪</span>
-          <span>Sign out</span>
-        </button>
-        <p className="text-center text-gray-600 text-xs">v0.7.9 — 2026-05-28</p>
+      {/* Version */}
+      <div className="px-3 py-4 border-t border-gray-800">
+        <p className="text-center text-gray-600 text-xs">v0.8.0 — 2026-05-31</p>
       </div>
     </aside>
   )

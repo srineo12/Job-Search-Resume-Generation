@@ -123,9 +123,41 @@ STRICT RULES:
 
 Respond with valid JSON only — no markdown, no explanation.`
 
+export interface FullJobData {
+  title: string
+  employer: string
+  location: string
+  description_text: string
+  description_html?: string
+  salary_text?: string
+  work_type?: string
+  raw_payload?: Record<string, unknown>
+}
+
+function buildJobContext(job: FullJobData): string {
+  const rp = job.raw_payload ?? {}
+  const rpContent = rp.content as Record<string, unknown> | undefined
+  const parts = [
+    `Title: ${job.title}`,
+    `Employer: ${job.employer}`,
+    `Location: ${job.location}`,
+    `Work Type: ${rp.workTypes as string || job.work_type || 'Not specified'}`,
+    `Work Arrangement: ${rp.workArrangements as string || 'Not specified'}`,
+    `Salary: ${rp.salary as string || job.salary_text || 'Not specified'}`,
+    rp.classificationInfo ? `Classification: ${(rp.classificationInfo as Record<string,string>).classification} / ${(rp.classificationInfo as Record<string,string>).subClassification}` : '',
+    rpContent?.jobHook ? `Job Hook: "${rpContent.jobHook}"` : '',
+    rpContent?.bulletPoints && Array.isArray(rpContent.bulletPoints) && rpContent.bulletPoints.length
+      ? `Key Points:\n${(rpContent.bulletPoints as string[]).map((b: string) => `• ${b}`).join('\n')}` : '',
+    rp.employerQuestions && Array.isArray(rp.employerQuestions) && (rp.employerQuestions as string[]).length
+      ? `Employer Questions:\n${(rp.employerQuestions as string[]).map((q: string) => `• ${q}`).join('\n')}` : '',
+    job.description_text ? `Full Description:\n${job.description_text}` : '',
+  ].filter(Boolean)
+  return parts.join('\n')
+}
+
 export async function generateResumeData(
   profile: Record<string, unknown>,
-  job: { title: string; employer: string; location: string; description_text: string },
+  job: FullJobData,
   customPrompt?: string,
   framingNote?: string,
 ): Promise<ResumeData> {
@@ -173,11 +205,7 @@ export async function generateResumeData(
 }`
 
   const userMsg = `JOB DETAILS:
-Title: ${job.title}
-Employer: ${job.employer}
-Location: ${job.location}
-Description:
-${(job.description_text ?? '').slice(0, 3000)}
+${buildJobContext(job)}
 
 CANDIDATE PROFILE:
 ${JSON.stringify(profile, null, 2)}
@@ -233,7 +261,7 @@ Return valid JSON only.`
 
 export async function generateCoverLetterData(
   profile: Record<string, unknown>,
-  job: { title: string; employer: string; location: string; description_text: string },
+  job: FullJobData,
   customPrompt?: string,
   framingNote?: string,
 ): Promise<CoverLetterData> {
@@ -261,11 +289,7 @@ export async function generateCoverLetterData(
 }`
 
   const userMsg = `JOB DETAILS:
-Title: ${job.title}
-Employer: ${job.employer}
-Location: ${job.location}
-Description:
-${(job.description_text ?? '').slice(0, 3000)}
+${buildJobContext(job)}
 
 CANDIDATE PROFILE:
 ${JSON.stringify(profile, null, 2)}
@@ -307,81 +331,6 @@ Return valid JSON only.`
   }
 }
 
-// ─── Dynamic Prompt Generation ────────────────────────────────────────────────
-//
-// Both job-fit scoring and resume/cover generation use AI-generated prompts
-// so they adapt automatically to different job categories and roles.
-// (No hardcoded education/childcare assumptions.)
-
-// ── Meta-prompt: generates a job-fit scoring prompt for a specific category ──
-
-const META_JOBFIT_PROMPT = `You are a job search strategist helping a career transitioner evaluate job listings.
-
-Your task: write a complete SCORING SYSTEM PROMPT for the AI model that will evaluate individual job listings.
-
-The prompt you write must:
-1. Be tailored to the SPECIFIC JOB CATEGORY provided — not generic assumptions
-   - If the category is admin/receptionist, focus on office, reception, customer service requirements
-   - If the category is childcare/education support, focus on WWCC, Cert III, classroom experience
-   - If the category is retail/hospitality, focus on customer service, cash handling, food safety
-   - Adapt hard disqualifiers and green flags to the ACTUAL category
-2. Define application worthiness as: "Should this candidate apply?" — NOT "does her resume match?"
-3. List 4-6 CATEGORY-SPECIFIC hard disqualifiers (mandatory licenses, registrations, minimum years for THIS category)
-4. List 4-6 CATEGORY-SPECIFIC green flags (entry-level indicators for THIS category)
-5. Include scoring bands: 90-100=HOT, 70-89=GOOD, 50-69=MAYBE, 30-49=MAYBE(stretch), 0-29=AVOID
-6. Reference the candidate's name, career background, and transferable strengths
-7. Specify the exact JSON response format for scoring each job
-
-Return ONLY the scoring system prompt text — no preamble, no explanation. Start with "You are scoring job listings..."`
-
-/**
- * Generates a job-fit scoring prompt using AI.
- * Called once per category scoring session; result is saved to keyword_sets.jobfit_prompt.
- * Replaces the old hardcoded buildJobfitScoringPrompt function.
- */
-export async function generateJobfitScoringPrompt(
-  profile: Record<string, unknown>,
-  categoryName: string,
-  categoryKeywords: string[],
-): Promise<string> {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-
-  const contact   = (profile.contact ?? {}) as Record<string, string>
-  const exp       = Array.isArray(profile.experience)      ? profile.experience      as Record<string, unknown>[] : []
-  const keySkills = Array.isArray(profile.key_skills)      ? profile.key_skills      as string[] : []
-  const certs     = String(profile.certifications ?? '')
-  const addInfo   = Array.isArray(profile.additional_info) ? profile.additional_info as string[] : []
-
-  const careerHistory = exp.map(e => `${e.role} at ${e.company}`).join(' → ')
-  const recentRole    = exp[0] ? `${exp[0].role} at ${exp[0].company}` : 'not specified'
-  const skills        = keySkills.slice(0, 12).join(', ')
-  const rights        = addInfo.join(' | ') || 'not specified'
-
-  const userMsg = `CANDIDATE PROFILE SUMMARY:
-- Name: ${contact.name || 'Candidate'}
-- Career path: ${careerHistory || recentRole}
-- Most recent role: ${recentRole}
-- Key skills: ${skills}
-- Certifications: ${certs || 'none listed'}
-- Work rights / availability: ${rights}
-
-TARGET CATEGORY: "${categoryName}"
-Category keywords: ${categoryKeywords.join(', ')}
-
-Write a scoring system prompt that correctly evaluates job listings in this specific category for this candidate.`
-
-  const completion = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
-    messages: [
-      { role: 'system', content: META_JOBFIT_PROMPT },
-      { role: 'user', content: userMsg },
-    ],
-    temperature: 0.3,
-  })
-
-  return completion.choices[0]?.message?.content?.trim() ?? buildJobfitScoringPrompt(profile, categoryName, categoryKeywords)
-}
-
 // ── Meta-prompt: generates resume + cover letter framing for a specific job ──
 
 const META_DOCUMENT_FRAMING_PROMPT = `You are a resume strategist. Given a candidate profile and a specific job description, write brief role-specific framing instructions that will guide an AI to write a highly targeted resume and cover letter.
@@ -406,7 +355,7 @@ Return valid JSON only:
  */
 export async function generateDocumentFraming(
   profile: Record<string, unknown>,
-  job: { title: string; employer: string; description_text: string },
+  job: FullJobData,
 ): Promise<{ resumeFraming: string; coverFraming: string }> {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -421,10 +370,7 @@ export async function generateDocumentFraming(
   ].join('\n')
 
   const userMsg = `JOB:
-Title: ${job.title}
-Employer: ${job.employer}
-Description (first 2000 chars):
-${(job.description_text ?? '').slice(0, 2000)}
+${buildJobContext(job)}
 
 CANDIDATE SUMMARY:
 ${profileSummary}
@@ -485,7 +431,7 @@ CANDIDATE CONTEXT:
 - Most recent role: ${recentRole}
 - Target category: "${categoryName}" (${categoryKeywords.join(', ')})
 - Transferable strengths: ${skills || 'see profile'}
-- Certifications: ${certs || 'none listed'}
+- Certifications: ${certs || 'none listed'} (all listed certifications are complete and currently valid)
 - Rights / availability: ${rights}
 
 SCORING BANDS:

@@ -16,6 +16,7 @@ interface Import {
   status: 'queued' | 'running' | 'succeeded' | 'failed'
   stats?: { fetched?: number; inserted?: number; duplicates_by_url?: number; duplicates_by_employer_title?: number; title_filtered?: number }
   input_payload?: Record<string, unknown>
+  keyword_set_ids?: string[]
   apify_run_id?: string
   error_message?: string
   created_at: string
@@ -251,6 +252,18 @@ export default function ImportsPage() {
                           {imp.status === 'succeeded' && '✓ Done'}
                           {imp.status === 'failed' && '✗ Failed'}
                         </span>
+                        {imp.keyword_set_ids && imp.keyword_set_ids.length > 0 && (
+                          <div className="flex gap-1 flex-wrap shrink-0">
+                            {imp.keyword_set_ids.map(kid => {
+                              const ks = searchSets.find(s => s.id === kid)
+                              return ks ? (
+                                <span key={kid} className="text-xs px-2 py-0.5 bg-indigo-950 border border-indigo-800 text-indigo-300 rounded-full">
+                                  {ks.name}
+                                </span>
+                              ) : null
+                            })}
+                          </div>
+                        )}
                         <span className="text-gray-500 text-xs truncate">
                           {imp.status === 'succeeded' && imp.stats
                             ? `${imp.stats.inserted} new · ${dupes} dupes · ${imp.stats.fetched ?? 0} fetched`

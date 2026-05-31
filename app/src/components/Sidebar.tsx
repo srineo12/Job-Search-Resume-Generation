@@ -43,7 +43,7 @@ export default function Sidebar({ user }: { user: User }) {
 
       {/* Version */}
       <div className="px-3 py-4 border-t border-gray-800">
-        <p className="text-center text-gray-600 text-xs">v0.8.1 — 2026-05-31</p>
+        <p className="text-center text-gray-600 text-xs">v0.8.2 — 2026-05-31</p>
       </div>
     </aside>
   )

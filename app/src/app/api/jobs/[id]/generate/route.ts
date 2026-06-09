@@ -2,11 +2,19 @@ export const runtime = 'nodejs'
 export const maxDuration = 60 // ignored on Vercel Hobby (10s cap), respected on Pro/Enterprise
 
 import { NextRequest, NextResponse } from 'next/server'
+import { writeFile, mkdir } from 'fs/promises'
+import path from 'path'
 import { getAuth } from '@/lib/supabase/get-auth'
 import { generateResumeData, generateCoverLetterData, calculateAtsScore, type FullJobData } from '@/lib/ai/generate-documents'
 import { buildResumePdf } from '@/lib/render/resume-pdf'
 import { buildCoverLetterPdf } from '@/lib/render/cover-letter-pdf'
 import JSZip from 'jszip'
+
+// Where generated documents are written when the server runs on the user's
+// machine (local dev). On Vercel this path does not exist, so the route falls
+// back to returning a ZIP download. Override with the RESUME_OUTPUT_DIR env var.
+const OUTPUT_DIR = process.env.RESUME_OUTPUT_DIR
+  || '/Users/srinivasanselvam/Library/CloudStorage/OneDrive-Linfox/Priya Resume/Applied Jobs'
 
 function slugify(text: string, limit = 22): string {
   return text
@@ -29,7 +37,7 @@ export async function POST(
   // ── 1. Fetch job — all fields needed for AI generation ──
   const { data: job, error: jobErr } = await supabase
     .from('jobs')
-    .select('id, title, employer, location, description_text, description_html, salary_text, work_type, raw_payload, status, source_job_id, url')
+    .select('id, title, employer, location, description_text, description_html, salary_text, work_type, raw_payload, status, source_job_id, url, import_id')
     .eq('id', jobId)
     .eq('user_id', user.id)
     .single()
@@ -59,16 +67,34 @@ export async function POST(
     raw_payload:      job.raw_payload as Record<string, unknown> ?? undefined,
   }
 
+  // ── 2b. Resolve category-specific framing prompts ──
+  // Job → import_id → imports.keyword_set_ids → keyword_sets.resume_prompt / cover_prompt.
+  // These are appended to the base system prompts so each category steers tailoring
+  // without a per-job framing API call. select('*') avoids errors pre-migration.
+  let resumeFraming: string | undefined
+  let coverFraming: string | undefined
+  if (job.import_id) {
+    const { data: imp } = await supabase
+      .from('imports').select('keyword_set_ids').eq('id', job.import_id).single()
+    const kwIds = (imp?.keyword_set_ids as string[] | null) ?? []
+    if (kwIds.length) {
+      const { data: kwSets } = await supabase
+        .from('keyword_sets').select('*').in('id', kwIds)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      resumeFraming = (kwSets ?? []).map(k => (k as any).resume_prompt as string).find(Boolean) || undefined
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      coverFraming  = (kwSets ?? []).map(k => (k as any).cover_prompt as string).find(Boolean) || undefined
+    }
+  }
+
   // ── 3. Generate resume + cover letter in parallel ──
   // Both calls fire simultaneously. Full job context (description, raw_payload fields)
-  // is in the user message, so the base prompts can self-direct without a framing pre-call.
-  // Removing the framing pre-call saves 3-4s and keeps the route within Vercel Hobby's
-  // 10s function limit.
+  // is in the user message; category framing (if set) is appended to the base prompt.
   let resumeData, clData
   try {
     ;[resumeData, clData] = await Promise.all([
-      generateResumeData(profile, jobData),
-      generateCoverLetterData(profile, jobData),
+      generateResumeData(profile, jobData, undefined, resumeFraming),
+      generateCoverLetterData(profile, jobData, undefined, coverFraming),
     ])
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -94,20 +120,16 @@ export async function POST(
     return NextResponse.json({ error: `Document rendering failed: ${msg}` }, { status: 500 })
   }
 
-  // ── 6. Package as ZIP ──
+  // ── 6. File naming ──
   const candidateName = resumeData.candidate.name.replace(/\s+/g, '_')
   const titleSlug     = slugify(job.title    ?? 'Role',     22)
   const employerSlug  = slugify(job.employer ?? 'Employer', 22)
-  const jobIdPrefix   = (job.source_job_id ?? jobId).slice(0, 8)
-  const folderName    = `${titleSlug}_${employerSlug}_${jobIdPrefix}`
+  // Folder is gen_<jobId> using the Seek source job id (the "Job ID" shown in the table),
+  // falling back to the internal id if the source id is missing.
+  const folderName    = `gen_${job.source_job_id ?? jobId}`
   const filePrefix    = `${candidateName}_${titleSlug}_${employerSlug}`
-
-  const zip = new JSZip()
-  const folder = zip.folder(folderName)!
-  folder.file(`${filePrefix}_Resume.pdf`,       resumePdf)
-  folder.file(`${filePrefix}_Cover_Letter.pdf`, clPdf)
-
-  const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+  const resumeName    = `${filePrefix}_Resume.pdf`
+  const coverName     = `${filePrefix}_Cover_Letter.pdf`
 
   // ── 7. Update job status + ATS score ──
   // Merge ATS result into existing ai_ranking JSONB (preserves ranking data)
@@ -129,19 +151,44 @@ export async function POST(
     .eq('id', jobId)
     .eq('user_id', user.id)
 
-  // ── 8. Return ZIP (ATS score in headers for immediate UI display) ──
+  // Shared ATS headers for immediate UI display (set on both response paths)
+  const atsHeaders: Record<string, string> = atsResult ? {
+    'X-ATS-Score':   String(atsResult.score),
+    'X-ATS-Verdict': atsResult.verdict,
+    'X-ATS-Matched': atsResult.matched_keywords.join('|'),
+    'X-ATS-Missing': atsResult.missing_keywords.join('|'),
+  } : {}
+
+  // ── 8a. Preferred path: write PDFs directly into the output folder ──
+  // Works when the server runs on the user's machine (local dev). On Vercel the
+  // path is not writable, so we catch and fall back to a ZIP download (8b).
+  try {
+    const dir = path.join(OUTPUT_DIR, folderName)
+    await mkdir(dir, { recursive: true })
+    await writeFile(path.join(dir, resumeName), resumePdf)
+    await writeFile(path.join(dir, coverName),  clPdf)
+    return NextResponse.json(
+      { ok: true, saved: true, output_path: dir, files: [resumeName, coverName] },
+      { headers: atsHeaders },
+    )
+  } catch (writeErr) {
+    console.warn('Local file write unavailable, returning ZIP download:', writeErr instanceof Error ? writeErr.message : String(writeErr))
+  }
+
+  // ── 8b. Fallback: package as ZIP and return as a download ──
+  const zip = new JSZip()
+  const folder = zip.folder(folderName)!
+  folder.file(resumeName, resumePdf)
+  folder.file(coverName,  clPdf)
+  const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+
   return new NextResponse(zipBuffer as unknown as BodyInit, {
     status: 200,
     headers: {
       'Content-Type':        'application/zip',
       'Content-Disposition': `attachment; filename="${folderName}.zip"`,
       'Content-Length':      String(zipBuffer.length),
-      ...(atsResult ? {
-        'X-ATS-Score':   String(atsResult.score),
-        'X-ATS-Verdict': atsResult.verdict,
-        'X-ATS-Matched': atsResult.matched_keywords.join('|'),
-        'X-ATS-Missing': atsResult.missing_keywords.join('|'),
-      } : {}),
+      ...atsHeaders,
     },
   })
 }

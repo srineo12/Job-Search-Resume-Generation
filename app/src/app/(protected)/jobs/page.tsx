@@ -397,19 +397,24 @@ export default function JobsPage() {
   // ── Bulk workflow ─────────────────────────────────────────────────────────
   async function bulkWorkflow(workflow: string) {
     if (workflow === 'generated') {
-      // Bulk generate — only Open jobs
-      const openIds = [...selected].filter(id => wfOf(jobs.find(j => j.id === id)?.status ?? '') === 'open')
-      if (!openIds.length) { toast('info', 'No Open jobs selected for generation'); setSelected(new Set()); return }
+      // Bulk generate — for EXACTLY the selected jobs (in current table order).
+      const ids = visible.map(j => j.id).filter(id => selected.has(id))
+      if (!ids.length) { toast('info', 'No jobs selected for generation'); setSelected(new Set()); return }
+      if (!confirm(`Generate resume + cover letter for ${ids.length} selected job${ids.length > 1 ? 's' : ''}?`)) return
       let ok = 0, fail = 0
-      toast('info', `Generating ${openIds.length} document set${openIds.length > 1 ? 's' : ''}…`, 'Each takes ~10s. Downloads will appear one by one.')
-      for (const id of openIds) {
-        const success = await handleGenerate(id)
+      // Sequential, one job per request — keeps each request short and avoids
+      // timeouts even when 10–20+ jobs are selected. A single failure never aborts
+      // the rest; we count and report at the end.
+      for (let i = 0; i < ids.length; i++) {
+        setScoreMsg(`Generating ${i + 1} of ${ids.length}…  (${ok} done${fail ? `, ${fail} failed` : ''})`)
+        const success = await handleGenerate(ids[i])
         success ? ok++ : fail++
       }
+      setScoreMsg('')
       const msg = fail === 0
-        ? `✓ ${ok} document set${ok > 1 ? 's' : ''} generated — check your Downloads folder`
+        ? `✓ ${ok} document set${ok > 1 ? 's' : ''} generated`
         : `${ok} succeeded, ${fail} failed`
-      toast(fail === 0 ? 'success' : 'error', msg, 'ZIP files saved to your browser Downloads folder')
+      toast(fail === 0 ? 'success' : 'error', msg, 'Saved to your Applied Jobs folder (gen_<jobId>)')
     } else {
       for (const id of selected) {
         const job = jobs.find(j => j.id === id)
@@ -555,13 +560,24 @@ export default function JobsPage() {
         toast('error', 'Generation failed', d.error ?? res.statusText)
         return false
       }
-      const blob = await res.blob()
-      const cd = res.headers.get('Content-Disposition') ?? ''
-      const filename = cd.match(/filename="([^"]+)"/)?.[1] ?? 'documents.zip'
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = filename; a.click()
-      URL.revokeObjectURL(url)
+      // Two possible responses:
+      //   JSON  → files were written directly to the output folder (local server)
+      //   ZIP   → fallback download (e.g. running on Vercel)
+      const contentType = res.headers.get('Content-Type') ?? ''
+      let savedTo = ''
+      let filename = ''
+      if (contentType.includes('application/json')) {
+        const d = await res.json().catch(() => ({}))
+        savedTo = d.output_path ?? ''
+      } else {
+        const blob = await res.blob()
+        const cd = res.headers.get('Content-Disposition') ?? ''
+        filename = cd.match(/filename="([^"]+)"/)?.[1] ?? 'documents.zip'
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url; a.download = filename; a.click()
+        URL.revokeObjectURL(url)
+      }
       // Read ATS score from response headers and update local state immediately
       const atsScore   = res.headers.get('X-ATS-Score')
       const atsVerdict = res.headers.get('X-ATS-Verdict') ?? undefined
@@ -582,7 +598,8 @@ export default function JobsPage() {
       } : j))
       setCounts(prev => ({ ...prev, open: Math.max(0, prev.open - 1), generated: prev.generated + 1 }))
       const atsLabel = atsScore ? `  ·  ATS ${atsScore}/100` : ''
-      toast('success', `✓ Documents ready${atsLabel}`, `${filename}  ·  Resume + Cover Letter`)
+      const where = savedTo ? `Saved to ${savedTo}` : `${filename}  ·  Resume + Cover Letter`
+      toast('success', `✓ Documents ready${atsLabel}`, where)
       return true
     } catch (err) {
       toast('error', 'Generation error', err instanceof Error ? err.message : String(err))
@@ -626,7 +643,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.8.1</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.9.0</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {visibleCounts.total} total · {visibleCounts.hot} hot · {visibleCounts.good} good · {visibleCounts.unranked} unscored
           </p>
@@ -1249,7 +1266,7 @@ export default function JobsPage() {
             <p className="text-gray-300 text-sm max-w-sm text-center">{scoreMsg}</p>
           )}
           {generating && (
-            <p className="text-gray-300 text-sm">This takes about 10–20 seconds. Do not navigate away.</p>
+            <p className="text-gray-300 text-sm">{scoreMsg || 'This takes about 10–20 seconds. Do not navigate away.'}</p>
           )}
         </div>
       )}

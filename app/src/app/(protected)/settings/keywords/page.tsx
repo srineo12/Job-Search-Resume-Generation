@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from 'react'
 
-type KeywordSet = { id: string; name: string; keywords: string[]; set_type: string; is_active: boolean; created_at: string }
+type KeywordSet = {
+  id: string; name: string; keywords: string[]; set_type: string; is_active: boolean; created_at: string
+  resume_prompt?: string | null; cover_prompt?: string | null
+}
 
 function SetSection({
   title, description, setType, accentClass,
@@ -18,6 +21,39 @@ function SetSection({
     loading: boolean; prompt?: string; editText?: string; editing?: boolean;
     saving?: boolean; error?: string; savedSource?: string; deleted?: boolean
   }>>({})
+  // Document-generation framing prompts: id → { resume, cover, saving, saved, error }
+  // Appended to the base resume / cover-letter prompts at generation time.
+  const [docPrompts, setDocPrompts] = useState<Record<string, {
+    resume: string; cover: string; saving?: boolean; saved?: boolean; error?: string
+  }>>({})
+
+  function docFor(s: KeywordSet) {
+    return docPrompts[s.id] ?? { resume: s.resume_prompt ?? '', cover: s.cover_prompt ?? '' }
+  }
+  function setDocField(s: KeywordSet, field: 'resume' | 'cover', value: string) {
+    const cur = docFor(s)
+    setDocPrompts(p => ({ ...p, [s.id]: { ...cur, [field]: value, saved: false, error: undefined } }))
+  }
+  async function saveDocPrompts(s: KeywordSet) {
+    const cur = docFor(s)
+    setDocPrompts(p => ({ ...p, [s.id]: { ...cur, saving: true, error: undefined } }))
+    try {
+      const res = await fetch('/api/settings/keywords', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: s.id, resume_prompt: cur.resume || null, cover_prompt: cur.cover || null }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        setDocPrompts(p => ({ ...p, [s.id]: { ...cur, saving: false, error: d.error ?? 'Save failed' } }))
+        return
+      }
+      setSets(prev => prev.map(x => x.id === s.id ? { ...x, resume_prompt: cur.resume || null, cover_prompt: cur.cover || null } : x))
+      setDocPrompts(p => ({ ...p, [s.id]: { ...cur, saving: false, saved: true } }))
+    } catch (e) {
+      setDocPrompts(p => ({ ...p, [s.id]: { ...cur, saving: false, error: String(e) } }))
+    }
+  }
 
   async function loadPrompt(id: string) {
     setPromptState(p => ({ ...p, [id]: { loading: true } }))
@@ -290,6 +326,48 @@ function SetSection({
                         <p className="text-gray-600 text-xs italic">Click "Load Prompt" to view and edit the AI scoring instructions for this category.</p>
                       )}
                     </div>
+
+                    {/* Document-generation framing prompts (resume + cover letter) */}
+                    <div className="pt-3 border-t border-gray-800">
+                      <div className="flex items-center gap-3 mb-2 flex-wrap">
+                        <p className="text-xs font-medium text-gray-400">📝 Document Generation Prompts</p>
+                        {docFor(s).saved && <span className="text-xs text-green-400 bg-green-950 border border-green-800 px-1.5 py-0.5 rounded">Saved</span>}
+                        <button
+                          onClick={() => saveDocPrompts(s)}
+                          disabled={docFor(s).saving}
+                          className="px-2 py-0.5 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs rounded"
+                        >
+                          {docFor(s).saving ? 'Saving…' : 'Save Prompts'}
+                        </button>
+                        <span className="text-xs text-gray-600">Appended to the base prompt for this category at generation time. Leave blank to use the base prompt only.</span>
+                      </div>
+                      {docPrompts[s.id]?.error && (
+                        <p className="text-red-400 text-xs bg-red-950 border border-red-800 rounded px-2 py-1 mb-2">{docPrompts[s.id].error}</p>
+                      )}
+                      <div className="space-y-2">
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Resume framing</p>
+                          <textarea
+                            value={docFor(s).resume}
+                            onChange={e => setDocField(s, 'resume', e.target.value)}
+                            rows={6}
+                            placeholder="e.g. Lead with the Tamil teacher + school volunteering experience. Inject keywords: student wellbeing, inclusive learning, classroom routines, WWCC, First Aid HLTAID012. De-emphasise fashion/retail roles."
+                            className="w-full px-3 py-2 bg-gray-950 border border-gray-700 rounded-lg text-gray-200 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y leading-relaxed placeholder-gray-600"
+                          />
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Cover letter framing</p>
+                          <textarea
+                            value={docFor(s).cover}
+                            onChange={e => setDocField(s, 'cover', e.target.value)}
+                            rows={6}
+                            placeholder="e.g. Open with genuine interest in education support. Para 2: classroom + volunteering specifics. Para 3: transferable patience/communication from customer service. Para 4: availability, WWCC, willingness to train."
+                            className="w-full px-3 py-2 bg-gray-950 border border-gray-700 rounded-lg text-gray-200 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y leading-relaxed placeholder-gray-600"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="flex gap-3">
                       <button onClick={() => setEditing(s)} className="text-xs text-indigo-400 hover:text-indigo-300">Edit</button>
                       <button onClick={() => handleDelete(s.id)} className="text-xs text-red-400 hover:text-red-300">Delete</button>

@@ -37,11 +37,16 @@ export async function PATCH(req: NextRequest) {
   const { supabase, user } = await getAuth()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { id, name, keywords, is_active, jobfit_prompt } = await req.json()
-  // Build update object — only include jobfit_prompt when explicitly provided
+  const { id, name, keywords, is_active, jobfit_prompt, resume_prompt, cover_prompt } = await req.json()
+  // Build update object — only include fields that were explicitly provided
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const updates: Record<string, any> = { name, keywords, is_active, updated_at: new Date().toISOString() }
+  const updates: Record<string, any> = { updated_at: new Date().toISOString() }
+  if (name !== undefined)          updates.name = name
+  if (keywords !== undefined)      updates.keywords = keywords
+  if (is_active !== undefined)     updates.is_active = is_active
   if (jobfit_prompt !== undefined) updates.jobfit_prompt = jobfit_prompt
+  if (resume_prompt !== undefined) updates.resume_prompt = resume_prompt
+  if (cover_prompt !== undefined)  updates.cover_prompt = cover_prompt
   const { data, error } = await supabase
     .from('keyword_sets')
     .update(updates)
@@ -49,9 +54,9 @@ export async function PATCH(req: NextRequest) {
     .select().single()
 
   if (error) {
-    // Give a clear message if the jobfit_prompt column hasn't been migrated yet
-    const msg = error.message.includes('jobfit_prompt')
-      ? 'Database migration needed: run  ALTER TABLE keyword_sets ADD COLUMN IF NOT EXISTS jobfit_prompt text;  in your Supabase SQL editor.'
+    // Give a clear message if a prompt column hasn't been migrated yet
+    const msg = /jobfit_prompt|resume_prompt|cover_prompt/.test(error.message)
+      ? 'Database migration needed: run  ALTER TABLE keyword_sets ADD COLUMN IF NOT EXISTS jobfit_prompt text, ADD COLUMN IF NOT EXISTS resume_prompt text, ADD COLUMN IF NOT EXISTS cover_prompt text;  in your Supabase SQL editor.'
       : error.message
     return NextResponse.json({ error: msg }, { status: 500 })
   }

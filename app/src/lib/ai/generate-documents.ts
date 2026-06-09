@@ -167,6 +167,35 @@ function buildJobContext(job: FullJobData): string {
   return parts.join('\n')
 }
 
+// Parse a "period" string into a comparable number (year*12 + monthIndex).
+// "Present"/"Current"/"Now" → a sentinel far in the future so current roles sort first.
+const MONTHS: Record<string, number> = {
+  jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11,
+}
+function periodPointToValue(s: string): number {
+  const t = s.trim().toLowerCase()
+  if (/present|current|now|ongoing/.test(t)) return Number.MAX_SAFE_INTEGER
+  const year = t.match(/\b(19|20)\d{2}\b/)?.[0]
+  if (!year) return 0
+  const mon = Object.keys(MONTHS).find(m => t.includes(m))
+  return Number(year) * 12 + (mon ? MONTHS[mon] : 0)
+}
+function splitPeriod(period: string): { start: number; end: number } {
+  // Separator is typically " - " (also handle en/em dashes). Last segment = end.
+  const parts = period.split(/[-–—]/).map(p => p.trim()).filter(Boolean)
+  if (parts.length === 0) return { start: 0, end: 0 }
+  const start = periodPointToValue(parts[0])
+  const end   = periodPointToValue(parts[parts.length - 1])
+  return { start, end }
+}
+/** Sort experience entries newest-first by end date, tie-broken by start date. Stable for equal dates. */
+function sortExperienceReverseChrono<T extends { period: string }>(entries: T[]): T[] {
+  return entries
+    .map((e, i) => ({ e, i, ...splitPeriod(e.period) }))
+    .sort((a, b) => (b.end - a.end) || (b.start - a.start) || (a.i - b.i))
+    .map(x => x.e)
+}
+
 export async function generateResumeData(
   profile: Record<string, unknown>,
   job: FullJobData,
@@ -245,20 +274,23 @@ Return valid JSON only.`
 
   const raw = JSON.parse(completion.choices[0]?.message?.content ?? '{}')
 
+  const mappedExperience = (raw.experience ?? []).map((e: Record<string, unknown>) => ({
+    role:     String(e.role ?? ''),
+    company:  String(e.company ?? ''),
+    period:   String(e.period ?? ''),
+    location: String(e.location ?? ''),
+    // Strip any leading "- " or "• " the AI may have added (renderer adds its own prefix)
+    bullets:  Array.isArray(e.bullets)
+      ? e.bullets.map(b => String(b).replace(/^[-•]\s+/, '').trim())
+      : [],
+  }))
+
   return {
     candidate,
     summary:          raw.summary ?? '',
     key_skills:       raw.key_skills ?? [],
-    experience:       (raw.experience ?? []).map((e: Record<string, unknown>) => ({
-      role:     String(e.role ?? ''),
-      company:  String(e.company ?? ''),
-      period:   String(e.period ?? ''),
-      location: String(e.location ?? ''),
-      // Strip any leading "- " or "• " the AI may have added (renderer adds its own prefix)
-      bullets:  Array.isArray(e.bullets)
-        ? e.bullets.map(b => String(b).replace(/^[-•]\s+/, '').trim())
-        : [],
-    })),
+    // Enforce reverse-chronological order in code — the model is not reliable at this.
+    experience:       sortExperienceReverseChrono(mappedExperience),
     education:        (raw.education ?? []).map((e: Record<string, unknown>) => ({
       degree:      String(e.degree ?? ''),
       institution: String(e.institution ?? ''),

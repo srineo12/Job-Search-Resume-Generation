@@ -486,15 +486,32 @@ SCORING BANDS:
 30-49  → MAYBE Significant prior experience expected; unclear if open to career changers
 0-29   → AVOID Hard disqualifier present
 
-HARD DISQUALIFIERS → score ≤ 25, priority = avoid:
-• Mandatory professional registration or licence candidate does not hold
+QUALIFICATION RULE (THE most common scoring mistake — read carefully):
+The candidate does NOT hold, and is NOT currently enrolled in, any Cert III, Cert IV, Diploma,
+ACECQA-approved, VIT, or teaching qualification. She is willing to study toward one ONLY IF an
+employer enrols and funds it through a traineeship.
+• If the role requires the applicant to ALREADY HOLD — or to ALREADY BE "working towards" /
+  "enrolled in" / "studying" — a Cert III, Cert IV, Diploma, or ACECQA-approved qualification,
+  this is a HARD DISQUALIFIER. Set qualification_risk="high", recommended_action="skip",
+  priority="avoid", score ≤ 30. This holds EVEN IF the ad also says "no experience required"
+  or "full training provided".
+• EXCEPTION — genuine traineeship/GTO: ONLY if the employer EXPLICITLY promises to enrol you in
+  and fund/support the formal qualification as part of the job (e.g. "earn while you learn",
+  "complete your Cert III while working", "we sponsor your qualification", "traineeship"), it is
+  NOT a disqualifier — treat it as a strong green flag (qualification_risk="low", score 85–100).
+• Do NOT confuse generic "full training provided" / "on-the-job training" (operational induction)
+  with formal qualification sponsorship. Only an explicit promise to enrol/fund the
+  Cert III/Diploma qualifies for the exception.
+
+OTHER HARD DISQUALIFIERS → score ≤ 25, priority = avoid:
+• Mandatory professional registration or licence candidate does not hold (e.g. VIT, nursing reg)
 • "Must have N+ years experience" where candidate has none in that field
-• Mandatory qualification the candidate has not completed
 • Senior / manager / lead roles requiring team management experience
 
 GREEN FLAGS that boost score:
-• "No experience required" / "training provided" / "we will support you"
-• Traineeship / entry-level / junior / casual
+• "No experience required" / "no qualification required" / "we will train you"
+• Genuine traineeship/GTO that enrols & funds the formal qualification
+• Entry-level / junior / casual / trainee / assistant
 • Duties match transferable skills from career history
 
 Respond with valid JSON only — no markdown:

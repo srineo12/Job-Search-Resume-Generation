@@ -77,10 +77,22 @@ export async function calculateAtsScore(
 const RESUME_SYSTEM_PROMPT = `You are generating a tailored ATS-friendly resume for a job application.
 
 CRITICAL — EXPERIENCE COMPLETENESS (most common failure):
-- Count the number of experience roles in the candidate profile BEFORE writing anything
-- Your output MUST contain EXACTLY that many entries in the "experience" array — no more, no fewer
-- NEVER drop, skip, or merge roles — even if they seem unrelated to the job
-- Tailor by adjusting BULLET COUNT and FOCUS, not by removing roles
+- Count the number of roles in the profile's "experience" array BEFORE writing anything
+- The output "experience" array MUST include EVERY one of those paid roles — never drop, skip, merge, or SUBSTITUTE one role for another
+- If the profile has a "volunteering" array, ADD those entries to the experience array as well (they are extra — they never replace a paid role)
+- Tailor by adjusting BULLET COUNT and FOCUS, never by removing roles
+
+CRITICAL — ORDERING (do not get this wrong):
+- List experience in STRICT reverse-chronological order: most recent end date first, oldest last
+- A current role ("Present") is the most recent. Order purely by date — NEVER reorder by relevance
+- "Lead with" / "emphasise" guidance means give a role MORE bullets and stronger wording — it does NOT mean moving it out of date order
+- Volunteering entries are placed by their own dates, interleaved with paid roles
+
+CRITICAL — PRESERVE METRICS AND ACHIEVEMENTS:
+- Carry every concrete number, metric, and named achievement from the profile into the tailored bullets, verbatim where truthful
+- Examples: "~50 calls per day", "500+ customers", "2,000+ orders", "Best Performer recognition (Feb 2025)", percentages, KPIs, award names
+- NEVER generalise a specific figure into vague language (do not turn "50 calls per day" into "high volume", or drop an award)
+- Quantified bullets outperform generic ones for both ATS and human reviewers
 
 KEYWORD INJECTION FOR ATS (critical — do this for every resume):
 - Read the job description and extract important keywords, role-specific phrases, and required skills
@@ -180,13 +192,14 @@ export async function generateResumeData(
   "summary": "3-4 sentence tailored summary. Sentence 1: describe the candidate by their CURRENT background/experience (NOT the role they are applying for). Sentence 2: most relevant current or recent role. Sentence 3: strongest transferable skills for this job. Sentence 4: eligibility/availability/commitment.",
   "key_skills": ["up to 12 most relevant skills from profile"],
   "experience": [
-    /* MUST contain exactly ${experienceCount} entries — one per role in the profile. Do NOT drop any. */
+    /* MUST include all ${experienceCount} paid roles from profile.experience (never drop or substitute),
+       PLUS any entries from profile.volunteering. Order STRICTLY reverse-chronological by date — newest first. */
     {
       "role": "exact role title from profile",
-      "company": "exact company from profile",
+      "company": "exact company (or organisation, for volunteering) from profile",
       "period": "Month Year - Month Year",
       "location": "City, Country",
-      "bullets": ["2-5 action verb bullets — count based on relevance to this job"]
+      "bullets": ["2-5 action verb bullets — count based on relevance; keep concrete numbers/metrics verbatim"]
     }
   ],
   "education": [

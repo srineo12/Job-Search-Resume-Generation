@@ -126,8 +126,10 @@ export async function POST(
   const employerSlug  = slugify(job.employer ?? 'Employer', 22)
   // Folder is gen_<jobId> using the Seek source job id (the "Job ID" shown in the table),
   // falling back to the internal id if the source id is missing.
-  const folderName    = `gen_${job.source_job_id ?? jobId}`
-  const filePrefix    = `${candidateName}_${titleSlug}_${employerSlug}`
+  const sourceId      = job.source_job_id ?? jobId
+  const folderName    = `gen_${sourceId}`
+  // Filenames START with the job id, as requested.
+  const filePrefix    = `${sourceId}_${candidateName}_${titleSlug}_${employerSlug}`
   const resumeName    = `${filePrefix}_Resume.pdf`
   const coverName     = `${filePrefix}_Cover_Letter.pdf`
 

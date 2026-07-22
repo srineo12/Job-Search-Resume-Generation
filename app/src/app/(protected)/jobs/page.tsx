@@ -180,8 +180,9 @@ export default function JobsPage() {
   const [scoreMsg,   setScoreMsg]   = useState('')
   const [generating, setGenerating] = useState<string | null>(null)
   // Category (keyword set) selector — required before running Job-fit Score
-  const [keywordSets,       setKeywordSets]       = useState<{ id: string; name: string; keywords: string[] }[]>([])
-  const [selectedCategory,  setSelectedCategory]  = useState<string>('')
+  const [keywordSets,           setKeywordSets]           = useState<{ id: string; name: string; keywords: string[] }[]>([])
+  const [selectedKeywordSet,    setSelectedKeywordSet]    = useState<string>('')
+  const [cleaningUp, setCleaningUp] = useState(false)
 
   // Toast notifications
   const [toasts, setToasts] = useState<Array<{ id: number; type: 'success'|'error'|'info'; msg: string; sub?: string }>>([])
@@ -424,9 +425,35 @@ export default function JobsPage() {
     setSelected(new Set())
   }
 
+  // ── Cleanup ────────────────────────────────────────────────────────────────
+  async function handleCleanup() {
+    if (!selectedKeywordSet) return
+    if (!confirm('Mark non-matching jobs as irrelevant? You can filter them out later.')) return
+
+    setCleaningUp(true)
+    try {
+      const res = await fetch('/api/jobs/cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword_set_id: selectedKeywordSet }),
+      })
+      const d = await res.json()
+      if (!res.ok) {
+        toast('error', 'Cleanup failed', d.error || 'Unknown error')
+        return
+      }
+      toast('success', '✓ Cleanup complete', d.message)
+      loadJobs()
+    } catch (err) {
+      toast('error', 'Cleanup error', err instanceof Error ? err.message : String(err))
+    } finally {
+      setCleaningUp(false)
+    }
+  }
+
   // ── Job-fit Score ─────────────────────────────────────────────────────────
   async function handleJobfitScore() {
-    if (!selectedCategory) return
+    if (!selectedKeywordSet) return
     setScoring(true)
     let total = 0
     const jobIds = selected.size > 0 ? [...selected] : undefined
@@ -445,7 +472,7 @@ export default function JobsPage() {
           const res = await fetch('/api/jobs/jobfit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ keyword_set_id: selectedCategory, job_ids: batch, limit: batchSize }),
+            body: JSON.stringify({ keyword_set_id: selectedKeywordSet, job_ids: batch, limit: batchSize }),
           })
           const d = await res.json()
           if (!res.ok) { setScoreMsg(`⚠️ ${d.error ?? 'Scoring failed'}`); break }
@@ -455,7 +482,7 @@ export default function JobsPage() {
           if (!d.scored && d.errors === 0) {
             // IDs not found (stale) — fall through to score all unscored
             setScoreMsg('Selection was stale — scoring all unscored jobs instead…')
-            await scoreAllUnscored(selectedCategory, (n, msg) => { total = n; setScoreMsg(msg) })
+            await scoreAllUnscored(selectedKeywordSet, (n, msg) => { total = n; setScoreMsg(msg) })
             break
           }
         }
@@ -465,7 +492,7 @@ export default function JobsPage() {
       }
     } else {
       // ── Path B: score all unscored jobs ──
-      await scoreAllUnscored(selectedCategory, (n, msg) => { total = n; setScoreMsg(msg) })
+      await scoreAllUnscored(selectedKeywordSet, (n, msg) => { total = n; setScoreMsg(msg) })
     }
 
     if (total > 0) {
@@ -643,7 +670,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.9.1</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.10.0</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {visibleCounts.total} total · {visibleCounts.hot} hot · {visibleCounts.good} good · {visibleCounts.unranked} unscored
           </p>
@@ -670,12 +697,12 @@ export default function JobsPage() {
               }} className="px-3 py-1.5 bg-red-950 hover:bg-red-900 text-red-400 text-xs rounded-lg">🗑 Delete</button>
             </>
           )}
-          {/* Category dropdown — required to enable Job-fit Score; also filters table rows */}
+          {/* Keyword Set dropdown — required to enable Job-fit Score and Cleanup */}
           <select
-            value={selectedCategory}
+            value={selectedKeywordSet}
             onChange={e => {
               const id = e.target.value
-              setSelectedCategory(id)
+              setSelectedKeywordSet(id)
               if (id) {
                 const name = keywordSets.find(ks => ks.id === id)?.name
                 if (name) setCatFilters(new Set([name]))
@@ -685,15 +712,22 @@ export default function JobsPage() {
             }}
             className="px-3 py-1.5 bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-500"
           >
-            <option value="">Category…</option>
+            <option value="">Keyword Set…</option>
             {keywordSets.map(ks => (
               <option key={ks.id} value={ks.id}>{ks.name}</option>
             ))}
           </select>
           <button
+            onClick={handleCleanup}
+            disabled={cleaningUp || !selectedKeywordSet}
+            title={!selectedKeywordSet ? 'Select a keyword set first' : 'Mark non-matching jobs as irrelevant'}
+            className="px-3 py-1.5 bg-orange-700 hover:bg-orange-600 disabled:opacity-40 text-white text-xs font-medium rounded-lg">
+            {cleaningUp ? '⚙️ Cleaning…' : '🧹 Clean Up'}
+          </button>
+          <button
             onClick={handleJobfitScore}
-            disabled={scoring || !selectedCategory}
-            title={!selectedCategory ? 'Select a category first' : `Score unscored jobs in ${keywordSets.find(k => k.id === selectedCategory)?.name ?? 'selected category'}`}
+            disabled={scoring || !selectedKeywordSet}
+            title={!selectedKeywordSet ? 'Select a keyword set first' : `Score unscored jobs in ${keywordSets.find(k => k.id === selectedKeywordSet)?.name ?? 'selected keyword set'}`}
             className="px-4 py-1.5 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white text-xs font-medium rounded-lg">
             {scoring ? '⚙️ Scoring…' : `⚡ Job-fit Score`}
           </button>
@@ -753,6 +787,7 @@ export default function JobsPage() {
               { k:'generated', l:`Generated (${visibleCounts.generated})` },
               { k:'applied',   l:`Applied (${visibleCounts.applied})` },
               { k:'discarded', l:`Discarded (${visibleCounts.discarded})` },
+              { k:'irrelevant', l:'Irrelevant' },
             ] as {k:string,l:string}[]).map(t => {
               const on = wfFilters.has(t.k)
               return (

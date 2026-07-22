@@ -73,6 +73,20 @@ A single-user web app for Priyadharshini Selvam to import jobs from Apify (Seek,
 - On import: dedupe by URL hash and by employer+title+location hash.
 - On generate / mark applied: warn if same employer+title combination already has `applied` / `interview` / `offer` / `documents_generated` status.
 
+### Keyword Cleanup
+- Auto-cleanup runs after import completes: matches jobs against keyword sets using OR logic (title OR description_text).
+- Non-matching jobs marked status `irrelevant` (not deleted, filtered via UI).
+- Manual cleanup available on Jobs page: select a keyword set, click "Clean Up" to apply cleanup to ALL jobs.
+- Matching is case-insensitive substring match (e.g., "Customer Service Officer" matches "customer service officer").
+- See `lib/import/cleanup.ts` and `APIFY_IMPORT_SPEC.md` section 10.
+
+### Naming Consistency
+- "Keyword Set" (singular term used consistently across all screens):
+  - Imports page: "Keyword Sets" (select for import search terms)
+  - Jobs page: "Keyword Set…" (select for Job-fit Score or Cleanup)
+  - Settings page: "Keyword Sets" (manage sets)
+  - Database: `keyword_sets` table, `keyword_set_ids` array in imports
+
 ### Google Drive
 - OAuth `drive.file` scope only.
 - Per-job folder: `/JobApps/{Employer}_{TitleSlug}_{jobIdPrefix}/`.

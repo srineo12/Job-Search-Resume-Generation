@@ -202,10 +202,10 @@ export default function ImportsPage() {
             </div>
           </div>
 
-          {/* Search Terms */}
+          {/* Keyword Sets */}
           <div>
             <label className="text-xs text-gray-500 mb-1.5 block">
-              Search Terms <span className="text-gray-600">(select keyword sets)</span>
+              Keyword Sets <span className="text-gray-600">(select one or more)</span>
             </label>
             <KeywordCheckboxList
               sets={searchSets}

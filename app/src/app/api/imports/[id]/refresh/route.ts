@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@/lib/supabase/get-auth'
+import { normalizeSeekJobs } from '@/lib/import/normalisers/seek'
+import { normalizeIndeedJobs } from '@/lib/import/normalisers/indeed'
+import { NormalizedJob } from '@/lib/import/normalisers/base'
+import { cleanupJobsByKeywords } from '@/lib/import/cleanup'
 
 async function safeJson(res: Response): Promise<unknown> {
   const text = await res.text()
   if (!text?.trim()) return null
   try { return JSON.parse(text) } catch { return null }
 }
-import { normalizeSeekJobs } from '@/lib/import/normalisers/seek'
-import { normalizeIndeedJobs } from '@/lib/import/normalisers/indeed'
-import { NormalizedJob } from '@/lib/import/normalisers/base'
 
 export async function GET(
   request: NextRequest,
@@ -232,12 +233,29 @@ export async function GET(
     }
   }
 
+  // Auto-cleanup: mark non-matching jobs as irrelevant
+  let cleanupResult = { cleaned: 0, kept: 0, errors: 0 }
+  if (importRecord.keyword_set_ids && Array.isArray(importRecord.keyword_set_ids) && importRecord.keyword_set_ids.length > 0) {
+    try {
+      cleanupResult = await cleanupJobsByKeywords(
+        supabase,
+        user.id,
+        importRecord.keyword_set_ids,
+        // Only cleanup newly inserted jobs from this import
+        stats.inserted > 0 ? undefined : [],
+      )
+    } catch (error) {
+      console.error('Error during auto-cleanup:', error)
+      // Continue anyway — cleanup failure shouldn't block import completion
+    }
+  }
+
   // Update import record with stats
   const { error: updateError } = await supabase
     .from('imports')
     .update({
       status: 'succeeded',
-      stats,
+      stats: { ...stats, cleanup_applied: cleanupResult.cleaned },
       finished_at: new Date().toISOString(),
     })
     .eq('id', importId)
@@ -256,6 +274,6 @@ export async function GET(
 
   return NextResponse.json({
     import: updatedImport,
-    message: `Import completed: ${stats.inserted} jobs inserted, ${stats.duplicates_by_url + stats.duplicates_by_employer_title} duplicates skipped`,
+    message: `Import completed: ${stats.inserted} jobs inserted, ${stats.duplicates_by_url + stats.duplicates_by_employer_title} duplicates skipped${cleanupResult.cleaned > 0 ? `, ${cleanupResult.cleaned} marked irrelevant` : ''}`,
   })
 }

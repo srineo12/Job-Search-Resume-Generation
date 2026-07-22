@@ -128,25 +128,45 @@ On completion, update `imports.stats`:
 }
 ```
 
-## 10. Auto-Rank After Import
+## 10. Auto-Cleanup After Import
+
+After all jobs are inserted, the server runs automatic cleanup to mark non-matching jobs as `irrelevant`.
+
+**Cleanup Logic:**
+1. Fetch keyword sets used in the import from `imports.keyword_set_ids`
+2. For each inserted job, check if `title` OR `description_text` (or stripped `description_html`) contains at least one keyword phrase (case-insensitive, substring match)
+3. Jobs matching at least one keyword: remain as `imported` (default status)
+4. Jobs matching NO keywords: status set to `irrelevant`
+5. User can later filter by status to hide irrelevant jobs
+
+The cleanup result (count of marked irrelevant) is stored in `imports.stats.cleanup_applied`.
+
+**Manual Cleanup:**
+Users can also manually trigger cleanup on the Jobs page by:
+1. Selecting a "Keyword Set" from the dropdown
+2. Clicking "Clean Up" button
+3. This cleans ALL jobs (not just recent imports) against the selected keyword set
+
+## 11. Auto-Rank After Import (Optional)
 
 Optional setting: "Automatically rank new jobs after import."
 
 If enabled, after insertion the server triggers ranking for each new job. Ranking is done in chunks (e.g. 10 jobs at a time) within a single Vercel function call, with a safety cap of 50 jobs per call. Remaining jobs are flagged for the next call.
 
-## 11. Rate Limits & Cost
+## 12. Rate Limits & Cost
 
 - Apify free tier credits are limited; user controls how many runs per day.
 - The app shows estimated credit cost per run (if Apify exposes it) before triggering.
 - Imports are not scheduled or automated in MVP.
 
-## 12. Error Handling
+## 13. Error Handling
 
 - Apify API errors → import status `failed`, error message stored.
 - Network errors → user can retry by clicking refresh.
 - Malformed items → skipped, counted in `errors`.
+- Cleanup errors → logged but do not block import completion.
 
-## 13. Future Sources
+## 14. Future Sources
 
 To add a new source (e.g. LinkedIn, Jora):
 1. Insert a new `apify_actors` row with actor ID and default input.

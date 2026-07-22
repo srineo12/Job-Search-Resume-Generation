@@ -21,22 +21,31 @@
 2. Selects one or more keyword sets (toggle on/off).
 3. Selects source(s): Seek, Indeed.
 4. Confirms location filter (default: Melbourne, remote OK).
-5. Clicks **Run Import**.
+5. Clicks **Start Import**.
 6. App calls Apify actor(s) with the configured input.
 7. Apify runs externally (no Vercel function held open).
 8. User sees import status: `queued` → `running` → `succeeded` / `failed`.
 9. On success, app fetches the dataset, normalises jobs, dedupes against existing rows, inserts new jobs with status `imported`.
-10. Import summary shown: X new, Y duplicates skipped, Z errors.
+10. Auto-cleanup runs: jobs not matching any keyword from the selected sets are marked status `irrelevant`.
+11. Import summary shown: X new, Y duplicates skipped, Z marked irrelevant, W errors.
 
-### 2.2 Rank Jobs
-1. Newly imported jobs default to status `imported`.
-2. User clicks **Rank New Jobs** (or auto-trigger after import).
-3. App iterates over `imported` jobs, calls Claude API with the active ranking prompt + job description + candidate profile snippet.
+### 2.2 Cleanup (Optional Manual)
+1. User opens **Jobs** page.
+2. Selects a "Keyword Set…" from the dropdown.
+3. Clicks **Clean Up** button.
+4. App marks all jobs not matching any keyword as status `irrelevant`.
+5. Success message shown with count of cleaned jobs.
+6. User can filter out `irrelevant` jobs using the Status filter.
+
+### 2.3 Rank Jobs
+1. Newly imported jobs default to status `imported` (or `irrelevant` if auto-cleaned).
+2. User selects a "Keyword Set…" and clicks **Job-fit Score** (or auto-trigger after import).
+3. App iterates over `imported` jobs (not `irrelevant`), calls Claude API with the active ranking prompt + job description + candidate profile snippet.
 4. Claude returns structured JSON: `score`, `category`, `reasons[]`, `disqualifiers[]`, `recommended_action`.
 5. App stores ranking result, updates job status to `ranked`.
 6. Progress indicator shown; user can navigate away — ranking continues in background via batched server actions.
 
-### 2.3 Review & Shortlist
+### 2.4 Review & Shortlist
 1. User opens **Jobs** list, default sort: score descending.
 2. Filters by score ≥ 70, status = `ranked`.
 3. Clicks a job → **Job Detail** view.
@@ -46,7 +55,7 @@
    - **Skip** → status becomes `skipped` (hidden from default view).
    - **Open Job URL** → opens original posting in new tab.
 
-### 2.4 Generate Documents
+### 2.5 Generate Documents
 1. From a shortlisted (or any) job detail view, user clicks **Generate Resume**.
 2. App checks for duplicate: if employer + title is already in `applied` status, show warning with link to existing record. User can confirm or cancel.
 3. App calls Claude with active `resume_generation` prompt + job description + candidate profile.
@@ -58,7 +67,7 @@
 9. Same flow for **Generate Cover Letter**.
 10. Job status updates to `documents_generated`.
 
-### 2.5 Apply Manually
+### 2.6 Apply Manually
 1. User opens job URL in a new tab.
 2. Downloads resume + cover letter PDFs from Drive or app.
 3. Applies on the job board manually.
@@ -66,7 +75,7 @@
 5. Optionally adds notes (e.g. "Applied via Seek, ref #12345").
 6. Status updates to `applied`; timestamp recorded.
 
-### 2.6 Track Outcomes
+### 2.7 Track Outcomes
 1. User updates status as outcomes arrive:
    - `interview` → adds date/notes.
    - `offer` → adds details.
@@ -74,7 +83,14 @@
    - `withdrawn` → user pulled the application.
 2. Status history visible on job detail page.
 
-## 3. Prompt Management Flow
+## 3. Keyword Set Management Flow
+
+1. User opens **Settings → Keyword Sets**.
+2. Creates a set with name + list of keywords.
+3. Edits, duplicates, deletes sets.
+4. Sets are referenced by name when triggering imports or cleanup.
+
+## 4. Prompt Management Flow
 
 1. User opens **Settings → Prompts**.
 2. Selects prompt type (ranking / resume / cover letter).
@@ -86,7 +102,7 @@
    - **Rollback** → set a previous version active.
 5. Only the last N versions retained (default 5); older versions auto-pruned.
 
-## 4. Style Config Flow
+## 5. Style Config Flow
 
 1. User opens **Settings → Style**.
 2. YAML editor with syntax highlighting.
@@ -94,19 +110,12 @@
 4. Set Active applies it to future document generation.
 5. Last 5 versions retained.
 
-## 5. Candidate Profile Flow
+## 6. Candidate Profile Flow
 
 1. User opens **Settings → Profile**.
 2. Edits structured fields: contact, summary, experience (per role with bullets), education, skills, certifications.
 3. Save updates the master profile (single record, not versioned in MVP).
 4. Used by all subsequent document generations.
-
-## 6. Keyword Set Flow
-
-1. User opens **Settings → Keyword Sets**.
-2. Creates a set with name + list of keywords.
-3. Edits, duplicates, deletes sets.
-4. Sets are referenced by name when triggering imports.
 
 ## 7. Error & Edge Case Flows
 
@@ -120,8 +129,8 @@
 ## 8. Navigation Map
 
 - **Dashboard** — counts (new, ranked, shortlisted, applied this week).
-- **Imports** — trigger and history of imports.
-- **Jobs** — list, filter, sort, search.
+- **Imports** — trigger and history of imports (auto-cleanup applied).
+- **Jobs** — list, filter, sort, search, cleanup, job-fit score.
 - **Job Detail** — full info, actions, history.
 - **Settings**
   - Prompts

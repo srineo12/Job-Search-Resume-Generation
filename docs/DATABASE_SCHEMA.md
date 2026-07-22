@@ -95,7 +95,7 @@ Normalised job listings.
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
 
-Status values: `imported`, `ranked`, `shortlisted`, `documents_generated`, `applied`, `interview`, `offer`, `rejected`, `withdrawn`, `skipped`, `error`.
+Status values: `imported`, `ranked`, `shortlisted`, `documents_generated`, `applied`, `interview`, `offer`, `rejected`, `withdrawn`, `skipped`, `error`, `irrelevant`.
 
 Indexes:
 - `(user_id, status)`

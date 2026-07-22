@@ -233,17 +233,26 @@ export async function GET(
     }
   }
 
-  // Auto-cleanup: mark non-matching jobs as irrelevant
+  // Auto-cleanup: mark non-matching jobs as irrelevant (only jobs from this import)
   let cleanupResult = { cleaned: 0, kept: 0, errors: 0 }
-  if (importRecord.keyword_set_ids && Array.isArray(importRecord.keyword_set_ids) && importRecord.keyword_set_ids.length > 0) {
+  if (importRecord.keyword_set_ids && Array.isArray(importRecord.keyword_set_ids) && importRecord.keyword_set_ids.length > 0 && stats.inserted > 0) {
     try {
-      cleanupResult = await cleanupJobsByKeywords(
-        supabase,
-        user.id,
-        importRecord.keyword_set_ids,
-        // Only cleanup newly inserted jobs from this import
-        stats.inserted > 0 ? undefined : [],
-      )
+      // Get newly inserted job IDs from this import
+      const { data: newJobs } = await supabase
+        .from('jobs')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('import_id', importId)
+
+      const newJobIds = newJobs?.map(j => j.id) || []
+      if (newJobIds.length > 0) {
+        cleanupResult = await cleanupJobsByKeywords(
+          supabase,
+          user.id,
+          importRecord.keyword_set_ids,
+          newJobIds,
+        )
+      }
     } catch (error) {
       console.error('Error during auto-cleanup:', error)
       // Continue anyway — cleanup failure shouldn't block import completion

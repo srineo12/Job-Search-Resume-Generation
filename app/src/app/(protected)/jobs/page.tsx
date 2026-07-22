@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -166,6 +166,47 @@ function relDate(d: string) {
   if (diff === 1) return '1d ago'
   if (diff < 30) return `${diff}d ago`
   return new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
+}
+
+// ─── CSV export ───────────────────────────────────────────────────────────────
+
+function csvEscape(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+}
+
+function jobExportValue(job: Job, colKey: string): string {
+  const rp = job.raw_payload ?? {}
+  switch (colKey) {
+    case 'source_job_id':      return job.source_job_id ?? ''
+    case 'title':               return job.title ?? ''
+    case 'employer':            return job.employer ?? ''
+    case 'location':            return job.location ?? ''
+    case 'role_description':    return (job.ai_ranking?.role_description ?? []).map(stripBulletPrefix).join(' | ')
+    case 'ranking_comments':    return (job.ai_ranking?.ranking_comments ?? []).map(stripBulletPrefix).join(' | ')
+    case 'ai_score':            return job.ai_score != null ? String(job.ai_score) : ''
+    case 'ats_score':           return job.ai_ranking?.ats_score != null ? String(job.ai_ranking.ats_score) : ''
+    case 'ai_priority':         return job.ai_priority ?? ''
+    case 'workflow_status':     return WF_LABEL[wfOf(job.status)] ?? ''
+    case 'recommended_action':  return job.ai_ranking?.recommended_action ?? ''
+    case 'tailoring_notes':     return job.ai_ranking?.tailoring_notes ?? ''
+    case 'red_flags':           return job.ai_ranking?.red_flags ?? ''
+    case 'salary_text':         return job.salary_text ?? ''
+    case 'work_type':           return job.work_type ?? ''
+    case 'arrangement':         return String(rp.workArrangements ?? '')
+    case 'applicants':          return rp.numApplicants != null ? String(rp.numApplicants) : ''
+    case 'source':               return job.source ?? ''
+    case 'posted_at':           return job.posted_at ? new Date(job.posted_at).toLocaleDateString('en-AU') : ''
+    case 'imported_at':         return job.created_at ? new Date(job.created_at).toLocaleDateString('en-AU') : ''
+    case 'category':            return job.category ?? ''
+    default:                    return ''
+  }
+}
+
+function jobsToCsv(jobs: Job[], cols: ColDef[]): string {
+  const header = ['Job Link', ...cols.map(c => c.label)]
+  const rows = jobs.map(job => [job.url ?? '', ...cols.map(c => jobExportValue(job, c.key))])
+  const lines = [header, ...rows].map(row => row.map(v => csvEscape(String(v ?? ''))).join(','))
+  return '﻿' + lines.join('\r\n')
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -572,10 +613,34 @@ export default function JobsPage() {
     return total
   }
 
+
+  function handleExportCsv() {
+    if (!visible.length) { toast('info', 'No jobs to export'); return }
+    const csv = jobsToCsv(visible, orderedCols)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const ts = new Date().toISOString().slice(0, 10)
+    const filename = `jobs-export-${ts}.csv`
+    const a = document.createElement('a')
+    a.href = url; a.download = filename; a.click()
+    URL.revokeObjectURL(url)
+    toast('success', `✓ Exported ${visible.length} job${visible.length > 1 ? 's' : ''}`, filename)
+  }
+
   async function handleDeleteJob(id: string) {
     if (!confirm('Delete this job?')) return
-    await fetch('/api/jobs', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id}) })
-    loadJobs()
+    try {
+      const res = await fetch('/api/jobs', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id}) })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        toast('error', 'Delete failed', d.error ?? res.statusText)
+        return
+      }
+      loadJobs()
+      toast('success', '✓ Job deleted')
+    } catch (err) {
+      toast('error', 'Delete error', err instanceof Error ? err.message : String(err))
+    }
   }
 
   async function handleGenerate(jobId: string): Promise<boolean> {
@@ -689,11 +754,20 @@ export default function JobsPage() {
               <button onClick={() => bulkWorkflow('open')}      className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg">↺ Re-open</button>
               <button onClick={async () => {
                 if (!confirm(`Delete ${selected.size} job${selected.size > 1 ? 's' : ''}? This cannot be undone.`)) return
-                for (const id of selected) {
-                  await fetch('/api/jobs', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+                try {
+                  let ok = 0, fail = 0
+                  for (const id of selected) {
+                    const res = await fetch('/api/jobs', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+                    if (res.ok) ok++
+                    else fail++
+                  }
+                  setSelected(new Set())
+                  loadJobs()
+                  const msg = fail === 0 ? `✓ ${ok} job${ok > 1 ? 's' : ''} deleted` : `${ok} deleted, ${fail} failed`
+                  toast(fail === 0 ? 'success' : 'error', msg)
+                } catch (err) {
+                  toast('error', 'Delete error', err instanceof Error ? err.message : String(err))
                 }
-                setSelected(new Set())
-                loadJobs()
               }} className="px-3 py-1.5 bg-red-950 hover:bg-red-900 text-red-400 text-xs rounded-lg">🗑 Delete</button>
             </>
           )}
@@ -734,6 +808,12 @@ export default function JobsPage() {
           <button onClick={handleSaveLayout}
             className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${layoutSaved ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
             {layoutSaved ? '✓ Saved' : '💾 Save Layout'}
+          </button>
+          <button
+            onClick={handleExportCsv}
+            title={`Export ${visibleCounts.total} filtered job${visibleCounts.total !== 1 ? 's' : ''} to CSV`}
+            className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium rounded-lg">
+            ⬇ Export CSV
           </button>
           {/* Font size controls */}
           <div className="flex items-center gap-1 bg-gray-800 rounded-lg border border-gray-700 px-2 py-1">
@@ -897,8 +977,8 @@ export default function JobsPage() {
                 const sel = selected.has(job.id)
                 const exp = expanded === job.id
 
-                function cell(content: React.ReactNode, extraClass = '') {
-                  return <td className={`px-2 py-2 text-white overflow-hidden ${extraClass}`}>{content}</td>
+                function cell(key: string, content: React.ReactNode, extraClass = '') {
+                  return <td key={key} className={`px-2 py-2 text-white overflow-hidden ${extraClass}`}>{content}</td>
                 }
 
                 function trunc(text: string | null | undefined, max = 999) {
@@ -909,8 +989,8 @@ export default function JobsPage() {
                 const rowBg = sel ? 'bg-indigo-950/40' : 'hover:bg-gray-800/40'
 
                 return (
-                  <>
-                    <tr key={job.id} data-testid={`job-row-${job.id}`} data-wf={wf} className={`group transition-colors ${rowBg}`}>
+                  <Fragment key={job.id}>
+                    <tr data-testid={`job-row-${job.id}`} data-wf={wf} className={`group transition-colors ${rowBg}`}>
                       {/* Checkbox */}
                       <td className={`px-2 py-2 text-center sticky left-0 z-10 ${sel ? 'bg-indigo-950' : 'bg-gray-900 group-hover:bg-gray-800'}`}>
                         <input type="checkbox" checked={sel} onChange={() => toggleSelect(job.id)} className="accent-indigo-500" />
@@ -952,10 +1032,10 @@ export default function JobsPage() {
                             </td>
 
                           case 'employer':
-                            return cell(trunc(job.employer), stickyCls)
+                            return cell(col.key, trunc(job.employer), stickyCls)
 
                           case 'location':
-                            return cell(trunc(job.location), stickyCls)
+                            return cell(col.key, trunc(job.location), stickyCls)
 
                           case 'role_description': {
                             const rd = job.ai_ranking?.role_description?.map(stripBulletPrefix) ?? []
@@ -1065,13 +1145,13 @@ export default function JobsPage() {
                             </td>
 
                           case 'salary_text':
-                            return cell(trunc(job.salary_text))
+                            return cell(col.key, trunc(job.salary_text))
 
                           case 'work_type':
-                            return cell(<span className="text-white">{job.work_type || '—'}</span>)
+                            return cell(col.key, <span className="text-white">{job.work_type || '—'}</span>)
 
                           case 'arrangement':
-                            return cell(<span className="text-white">{String(rp.workArrangements || '—')}</span>)
+                            return cell(col.key, <span className="text-white">{String(rp.workArrangements || '—')}</span>)
 
                           case 'applicants':
                             return <td key={col.key} className="px-2 py-2 text-white text-right">
@@ -1242,7 +1322,7 @@ export default function JobsPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 )
               })}
             </tbody>

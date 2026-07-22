@@ -69,14 +69,17 @@ export async function cleanupJobsByKeywords(
   // Determine which jobs to mark as irrelevant
   const jobsToClean: string[] = []
 
+  console.log(`[Cleanup] Checking ${jobs.length} jobs against ${allKeywords.length} keywords:`, allKeywords)
+
   for (const job of jobs) {
-    if (jobMatches(job.title, job.description_text, job.description_html, allKeywords)) {
-      // Keep this job (already has correct status from import)
-    } else {
-      // Mark as irrelevant
+    const matches = jobMatches(job.title, job.description_text, job.description_html, allKeywords)
+    if (!matches) {
+      console.log(`[Cleanup] Marking irrelevant: "${job.title}" (desc length: ${(job.description_text || '').length})`)
       jobsToClean.push(job.id)
     }
   }
+
+  console.log(`[Cleanup] Found ${jobsToClean.length} jobs to mark as irrelevant out of ${jobs.length}`)
 
   // Update jobs to irrelevant status
   let cleaned = 0

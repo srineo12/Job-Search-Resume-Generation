@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
+import { APP_VERSION, APP_VERSION_DATE } from '@/lib/version'
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: '📊' },
@@ -43,7 +44,7 @@ export default function Sidebar({ user }: { user: User }) {
 
       {/* Version */}
       <div className="px-3 py-4 border-t border-gray-800">
-        <p className="text-center text-gray-600 text-xs">v0.9.2 — 2026-07-22</p>
+        <p className="text-center text-gray-600 text-xs">v{APP_VERSION} — {APP_VERSION_DATE}</p>
       </div>
     </aside>
   )

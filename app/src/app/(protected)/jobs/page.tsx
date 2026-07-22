@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { APP_VERSION } from '@/lib/version'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -122,6 +123,7 @@ const ALL_COLS: ColDef[] = [
   { key: 'posted_at',           label: 'Posted',         defaultWidth: 80,  sortable: true,  filterable: false, filterType: 'text' },
   { key: 'imported_at',         label: 'Fetched',        defaultWidth: 80,  sortable: true,  filterable: false, filterType: 'text' },
   { key: 'category',            label: 'Category',       defaultWidth: 130, sortable: true,  filterable: true,  filterType: 'select', filterOptions: [] },
+  { key: 'raw_content',         label: 'Raw Data',       defaultWidth: 220, sortable: false, filterable: false, filterType: 'text' },
 ]
 
 const LS_KEY = 'jobs-col-layout-v4'
@@ -198,6 +200,7 @@ function jobExportValue(job: Job, colKey: string): string {
     case 'posted_at':           return job.posted_at ? new Date(job.posted_at).toLocaleDateString('en-AU') : ''
     case 'imported_at':         return job.created_at ? new Date(job.created_at).toLocaleDateString('en-AU') : ''
     case 'category':            return job.category ?? ''
+    case 'raw_content':         return rp.content?.unEditedContent ?? ''
     default:                    return ''
   }
 }
@@ -245,9 +248,11 @@ export default function JobsPage() {
   const [sortKey, setSortKey] = useState<string>('ai_score')
   const [sortDir, setSortDir] = useState<'asc'|'desc'|null>('desc')
 
-  // Column layout
+  // Column layout — merge in any columns added since the layout was last saved
+  // (e.g. a new column shipped in an update) so they don't get hidden.
   const saved = loadLayout()
-  const [colOrder,  setColOrder]  = useState<string[]>(saved?.order  ?? ALL_COLS.map(c => c.key))
+  const savedOrder = saved?.order ? [...saved.order, ...ALL_COLS.map(c => c.key).filter(k => !saved.order.includes(k))] : ALL_COLS.map(c => c.key)
+  const [colOrder,  setColOrder]  = useState<string[]>(savedOrder)
   const [colWidths, setColWidths] = useState<Record<string,number>>(saved?.widths ?? Object.fromEntries(ALL_COLS.map(c => [c.key, c.defaultWidth])))
   const [layoutSaved, setLayoutSaved] = useState(false)
 
@@ -735,7 +740,7 @@ export default function JobsPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v0.10.0</span></h1>
+          <h1 className="text-2xl font-bold text-white">Jobs <span className="text-xs font-normal text-gray-600 ml-1">v{APP_VERSION}</span></h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {visibleCounts.total} total · {visibleCounts.hot} hot · {visibleCounts.good} good · {visibleCounts.unranked} unscored
           </p>
@@ -1168,6 +1173,18 @@ export default function JobsPage() {
                             return <td key={col.key} className="px-2 py-2 text-white">
                               {job.source ? <span className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-300 text-xs border border-gray-700">{job.source}</span> : <span className="text-gray-600">—</span>}
                             </td>
+
+                          case 'raw_content': {
+                            const raw = rp.content?.unEditedContent
+                            const preview = raw && raw.length > 4000
+                              ? raw.slice(0, 4000) + '\n\n… (truncated — use Export CSV for the full text)'
+                              : raw
+                            return <td key={col.key} className="px-2 py-2 text-gray-400 overflow-hidden cursor-default"
+                              onMouseEnter={e => raw && showTooltip(e, 'Raw Data (unedited)', [preview!])}
+                              onMouseLeave={hideTooltip}>
+                              {raw ? <span className="block truncate font-mono text-[11px]">{raw}</span> : <span className="text-gray-600">—</span>}
+                            </td>
+                          }
 
                           default:
                             return <td key={col.key} className="px-2 py-2 text-gray-600">—</td>
